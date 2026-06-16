@@ -1,0 +1,7 @@
+.build/
+.gg/
+.DS_Store
+*.xcuserdata/
+*.xcuserstate
+.env
+*.log
