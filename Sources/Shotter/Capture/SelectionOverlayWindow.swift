@@ -4,12 +4,17 @@ final class SelectionOverlayController {
     private var windows: [SelectionOverlayWindow] = []
     private var completion: ((NSRect?) -> Void)?
     private var didPushCursor = false
+    private let snapshots: [ScreenSnapshot]
+
+    init(snapshots: [ScreenSnapshot] = []) {
+        self.snapshots = snapshots
+    }
 
     func begin(completion: @escaping (NSRect?) -> Void) {
         self.completion = completion
-        NSApp.activate(ignoringOtherApps: true)
         windows = NSScreen.screens.map { screen in
-            let window = SelectionOverlayWindow(screen: screen)
+            let snapshot = snapshots.first { $0.screenFrame == screen.frame }
+            let window = SelectionOverlayWindow(screen: screen, snapshotImage: snapshot?.image)
             window.selectionView.onFinish = { [weak self] rect in self?.finish(rect) }
             window.selectionView.onCancel = { [weak self] in self?.finish(nil) }
             return window
@@ -59,17 +64,18 @@ final class SelectionOverlayController {
 final class SelectionOverlayWindow: NSPanel {
     let selectionView: SelectionOverlayView
 
-    init(screen: NSScreen) {
-        selectionView = SelectionOverlayView(screenFrame: screen.frame)
+    init(screen: NSScreen, snapshotImage: NSImage? = nil) {
+        selectionView = SelectionOverlayView(screenFrame: screen.frame, snapshotImage: snapshotImage)
         super.init(
             contentRect: screen.frame,
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
+        animationBehavior = .none
         level = .screenSaver
         acceptsMouseMovedEvents = true
         ignoresMouseEvents = false

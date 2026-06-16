@@ -5,11 +5,13 @@ final class SelectionOverlayView: NSView {
     var onCancel: (() -> Void)?
 
     private let screenFrame: NSRect
+    private let snapshotImage: NSImage?
     private var startPoint: NSPoint?
     private var currentPoint: NSPoint?
 
-    init(screenFrame: NSRect) {
+    init(screenFrame: NSRect, snapshotImage: NSImage? = nil) {
         self.screenFrame = screenFrame
+        self.snapshotImage = snapshotImage
         super.init(frame: NSRect(origin: .zero, size: screenFrame.size))
         wantsLayer = true
     }
@@ -84,7 +86,7 @@ final class SelectionOverlayView: NSView {
     }
 
     override func draw(_ dirtyRect: NSRect) {
-        drawScreenOutline()
+        drawSnapshotBackground()
 
         guard let rect = selectionRect else {
             drawInstructionPill()
@@ -105,11 +107,9 @@ final class SelectionOverlayView: NSView {
         label.draw(at: NSPoint(x: rect.minX + 6, y: rect.maxY + 6), withAttributes: attributes)
     }
 
-    private func drawScreenOutline() {
-        NSColor.systemBlue.withAlphaComponent(0.55).setStroke()
-        let outline = NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1))
-        outline.lineWidth = 2
-        outline.stroke()
+    private func drawSnapshotBackground() {
+        guard let snapshotImage else { return }
+        snapshotImage.draw(in: bounds, from: NSRect(origin: .zero, size: snapshotImage.size), operation: .copy, fraction: 1)
     }
 
     private func drawInstructionPill() {

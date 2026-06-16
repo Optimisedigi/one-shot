@@ -41,6 +41,14 @@ final class EditorToolbarView: NSView {
         }
 
         stack.addArrangedSubview(separator())
+        let undoButton = NSButton(title: "↶", target: self, action: #selector(undoLastChange))
+        undoButton.toolTip = "Undo Last Change (⌃Z or ⌘Z)"
+        undoButton.font = .systemFont(ofSize: 22, weight: .semibold)
+        undoButton.bezelStyle = .rounded
+        undoButton.widthAnchor.constraint(equalToConstant: 48).isActive = true
+        stack.addArrangedSubview(undoButton)
+
+        stack.addArrangedSubview(separator())
 
         let colorLabel = NSTextField(labelWithString: "Color")
         colorLabel.textColor = .secondaryLabelColor
@@ -76,6 +84,10 @@ final class EditorToolbarView: NSView {
 
     @objc private func changeSelectedColor(_ sender: NSColorWell) {
         canvasView?.applyColorToSelectedAnnotation(sender.color)
+    }
+
+    @objc private func undoLastChange() {
+        canvasView?.undoLastChange()
     }
 
     @objc private func savePNG() {

@@ -30,6 +30,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window.onCancel = { [weak self] in
             self?.canvasView.cancelEditingOrClose()
         }
+        window.onUndo = { [weak self] in
+            self?.canvasView.undoLastChange()
+        }
         window.delegate = self
         canvasView.windowController = self
     }
@@ -46,13 +49,16 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 private final class EditorWindow: NSWindow {
     var onQuickSave: (() -> Void)?
     var onCancel: (() -> Void)?
+    var onUndo: (() -> Void)?
 
     override func cancelOperation(_ sender: Any?) {
         onCancel?()
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 {
+        if isUndoShortcut(event) {
+            onUndo?()
+        } else if event.keyCode == 53 {
             onCancel?()
         } else {
             super.keyDown(with: event)
@@ -60,6 +66,10 @@ private final class EditorWindow: NSWindow {
     }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if isUndoShortcut(event) {
+            onUndo?()
+            return true
+        }
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
            event.charactersIgnoringModifiers?.lowercased() == "s" {
             onQuickSave?()

@@ -15,7 +15,16 @@ final class CaptureCoordinator {
             return
         }
 
-        let controller = SelectionOverlayController()
+        let snapshots: [ScreenSnapshot]
+        do {
+            snapshots = try captureService.captureScreens()
+        } catch {
+            NSAlert.show(message: "Screenshot failed", informativeText: error.localizedDescription)
+            onFinish?()
+            return
+        }
+
+        let controller = SelectionOverlayController(snapshots: snapshots)
         overlayController = controller
         controller.begin { [weak self] result in
             guard let self else { return }
@@ -24,15 +33,12 @@ final class CaptureCoordinator {
                 onFinish?()
                 return
             }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
-                guard let self else { return }
-                defer { onFinish?() }
-                do {
-                    let image = try self.captureService.capture(rect: rect)
-                    self.openEditor(with: image)
-                } catch {
-                    NSAlert.show(message: "Screenshot failed", informativeText: error.localizedDescription)
-                }
+            defer { onFinish?() }
+            do {
+                let image = try self.captureService.crop(rect: rect, from: snapshots)
+                self.openEditor(with: image)
+            } catch {
+                NSAlert.show(message: "Screenshot failed", informativeText: error.localizedDescription)
             }
         }
     }

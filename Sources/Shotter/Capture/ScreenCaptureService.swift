@@ -1,6 +1,15 @@
 import AppKit
 import CoreGraphics
 
+struct ScreenSnapshot {
+    let screenFrame: NSRect
+    let cgImage: CGImage
+
+    var image: NSImage {
+        NSImage(cgImage: cgImage, size: screenFrame.size)
+    }
+}
+
 enum ScreenCaptureError: LocalizedError {
     case noDisplayForSelection
     case captureFailed
@@ -19,26 +28,52 @@ enum ScreenCaptureError: LocalizedError {
 }
 
 final class ScreenCaptureService {
+    func captureScreens() throws -> [ScreenSnapshot] {
+        try NSScreen.screens.map { screen in
+            guard let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber,
+                  let cgImage = CGDisplayCreateImage(displayID.uint32Value) else {
+                throw ScreenCaptureError.captureFailed
+            }
+            return ScreenSnapshot(screenFrame: screen.frame, cgImage: cgImage)
+        }
+    }
+
     func capture(rect appKitRect: NSRect) throws -> NSImage {
-        guard let screen = NSScreen.screens.first(where: { $0.frame.intersects(appKitRect) }) else {
+        let snapshots = try captureScreens()
+        return try crop(rect: appKitRect, from: snapshots)
+    }
+
+    func crop(rect appKitRect: NSRect, from snapshots: [ScreenSnapshot]) throws -> NSImage {
+        guard let snapshot = snapshots
+            .filter({ $0.screenFrame.intersects(appKitRect) })
+            .max(by: { $0.screenFrame.intersection(appKitRect).area < $1.screenFrame.intersection(appKitRect).area }) else {
             throw ScreenCaptureError.noDisplayForSelection
         }
 
-        let clippedRect = appKitRect.intersection(screen.frame)
-        let captureRect = Geometry.cgCaptureRect(fromAppKitRect: clippedRect, in: screen)
-
-        guard let cgImage = CGWindowListCreateImage(
-            captureRect,
-            .optionOnScreenOnly,
-            kCGNullWindowID,
-            [.bestResolution, .boundsIgnoreFraming]
-        ) else {
-            throw ScreenCaptureError.captureFailed
+        let clippedRect = appKitRect.intersection(snapshot.screenFrame)
+        let cropRect = pixelCropRect(for: clippedRect, in: snapshot)
+        guard let cgImage = snapshot.cgImage.cropping(to: cropRect) else {
+            throw ScreenCaptureError.imageConversionFailed
         }
 
-        let scale = screen.backingScaleFactor
-        let image = NSImage(cgImage: cgImage, size: NSSize(width: clippedRect.width, height: clippedRect.height))
-        image.size = NSSize(width: CGFloat(cgImage.width) / scale, height: CGFloat(cgImage.height) / scale)
-        return image
+        return NSImage(cgImage: cgImage, size: clippedRect.size)
     }
+
+    private func pixelCropRect(for appKitRect: NSRect, in snapshot: ScreenSnapshot) -> CGRect {
+        let scaleX = CGFloat(snapshot.cgImage.width) / snapshot.screenFrame.width
+        let scaleY = CGFloat(snapshot.cgImage.height) / snapshot.screenFrame.height
+        let relativeX = appKitRect.minX - snapshot.screenFrame.minX
+        let relativeY = appKitRect.minY - snapshot.screenFrame.minY
+        let pixelRect = CGRect(
+            x: relativeX * scaleX,
+            y: (snapshot.screenFrame.height - relativeY - appKitRect.height) * scaleY,
+            width: appKitRect.width * scaleX,
+            height: appKitRect.height * scaleY
+        ).integral
+        return pixelRect.intersection(CGRect(x: 0, y: 0, width: snapshot.cgImage.width, height: snapshot.cgImage.height))
+    }
+}
+
+private extension CGRect {
+    var area: CGFloat { width * height }
 }

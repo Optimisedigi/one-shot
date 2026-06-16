@@ -9,6 +9,7 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
 
     private var baseImage: NSImage
     private var annotations: [Annotation] = []
+    private var undoStack: [[Annotation]] = []
     private var dragStartImagePoint: NSPoint?
     private var dragCurrentImagePoint: NSPoint?
     private var activeTextField: NSTextField?
@@ -46,11 +47,17 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
 
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
-        NSColor.controlBackgroundColor.setFill()
+        NSColor(calibratedWhite: 0.18, alpha: 1).setFill()
         bounds.fill()
 
         let rect = imageRect
+        NSColor.black.withAlphaComponent(0.22).setFill()
+        NSBezierPath(roundedRect: rect.insetBy(dx: -3, dy: -3).offsetBy(dx: 0, dy: -2), xRadius: 5, yRadius: 5).fill()
         baseImage.draw(in: rect, from: NSRect(origin: .zero, size: baseImage.size), operation: .sourceOver, fraction: 1)
+        NSColor.separatorColor.setStroke()
+        let imageOutline = NSBezierPath(rect: rect)
+        imageOutline.lineWidth = 2
+        imageOutline.stroke()
 
         NSGraphicsContext.saveGraphicsState()
         let transform = NSAffineTransform()
@@ -69,6 +76,7 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
         if let annotationIndex = annotationIndex(at: point) {
             selectedAnnotationIndex = annotationIndex
             if tool == .text, case .text(_, let origin) = annotations[annotationIndex].kind {
+                recordUndoState()
                 movingTextIndex = annotationIndex
                 movingTextOffset = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
             }
@@ -86,7 +94,7 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let point = imagePoint(from: event.locationInWindow) else { return }
+        let point = imagePoint(from: event.locationInWindow, clamped: true)
         if let movingTextIndex {
             moveTextAnnotation(at: movingTextIndex, to: NSPoint(x: point.x - movingTextOffset.x, y: point.y - movingTextOffset.y))
         } else {
@@ -102,7 +110,8 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
             needsDisplay = true
             return
         }
-        guard let start = dragStartImagePoint, let end = imagePoint(from: event.locationInWindow) else { return }
+        guard let start = dragStartImagePoint else { return }
+        let end = imagePoint(from: event.locationInWindow, clamped: true)
         defer {
             dragStartImagePoint = nil
             dragCurrentImagePoint = nil
@@ -112,9 +121,11 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
         let rect = Geometry.normalizedRect(from: start, to: end)
         switch tool {
         case .rectangle where rect.width > 2 && rect.height > 2:
+            recordUndoState()
             annotations.append(Annotation(kind: .rectangle(rect), lineWidth: 6))
             selectedAnnotationIndex = annotations.indices.last
         case .arrow where distance(start, end) > 2:
+            recordUndoState()
             annotations.append(Annotation(kind: .arrow(start: start, end: end)))
             selectedAnnotationIndex = annotations.indices.last
         default:
@@ -126,12 +137,12 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "s" {
             commitActiveText()
             savePNGToDesktop(closeAfterSave: true)
+        } else if isUndoShortcut(event) {
+            undoLastChange()
         } else if event.keyCode == 53 {
             cancelEditingOrClose()
         } else if event.keyCode == 51, !annotations.isEmpty {
-            annotations.removeLast()
-            selectedAnnotationIndex = annotations.indices.last
-            needsDisplay = true
+            deleteLastAnnotation()
         } else if event.charactersIgnoringModifiers == "+" || event.charactersIgnoringModifiers == "=" {
             zoom = min(zoom * 1.2, 6)
             needsDisplay = true
@@ -154,6 +165,25 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
         }
     }
 
+    func undoLastChange() {
+        commitActiveText()
+        guard let previousAnnotations = undoStack.popLast() else { return }
+        annotations = previousAnnotations
+        selectedAnnotationIndex = annotations.indices.last
+        needsDisplay = true
+    }
+
+    private func deleteLastAnnotation() {
+        recordUndoState()
+        annotations.removeLast()
+        selectedAnnotationIndex = annotations.indices.last
+        needsDisplay = true
+    }
+
+    private func recordUndoState() {
+        undoStack.append(annotations)
+    }
+
     func savePNG() {
         guard let window else { return }
         let panel = NSSavePanel()
@@ -171,7 +201,7 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
     }
 
     private var imageRect: NSRect {
-        var rect = Geometry.aspectFitRect(imageSize: baseImage.size, in: bounds.insetBy(dx: 24, dy: 24))
+        var rect = Geometry.aspectFitRect(imageSize: baseImage.size, in: bounds.insetBy(dx: 8, dy: 8))
         let center = NSPoint(x: rect.midX, y: rect.midY)
         rect.size.width *= zoom
         rect.size.height *= zoom
@@ -184,7 +214,22 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
         let point = convert(windowPoint, from: nil)
         let rect = imageRect
         guard rect.contains(point) else { return nil }
-        return NSPoint(
+        return imagePoint(fromViewPoint: point, in: rect)
+    }
+
+    private func imagePoint(from windowPoint: NSPoint, clamped: Bool) -> NSPoint {
+        let point = convert(windowPoint, from: nil)
+        let rect = imageRect
+        guard clamped else { return imagePoint(fromViewPoint: point, in: rect) }
+        let clampedPoint = NSPoint(
+            x: min(max(point.x, rect.minX), rect.maxX),
+            y: min(max(point.y, rect.minY), rect.maxY)
+        )
+        return imagePoint(fromViewPoint: clampedPoint, in: rect)
+    }
+
+    private func imagePoint(fromViewPoint point: NSPoint, in rect: NSRect) -> NSPoint {
+        NSPoint(
             x: ((point.x - rect.minX) / rect.width) * baseImage.size.width,
             y: ((point.y - rect.minY) / rect.height) * baseImage.size.height
         )
@@ -252,6 +297,7 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
         guard let field = activeTextField else { return }
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty, let origin = activeTextOrigin {
+            recordUndoState()
             annotations.append(Annotation(kind: .text(text, origin: origin)))
             selectedAnnotationIndex = annotations.indices.last
         }
@@ -264,6 +310,7 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
 
     func applyColorToSelectedAnnotation(_ color: NSColor) {
         guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else { return }
+        recordUndoState()
         annotations[selectedAnnotationIndex].color = color
         onSelectionChange?(color)
         needsDisplay = true
@@ -364,6 +411,11 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
 
 private func distance(_ a: NSPoint, _ b: NSPoint) -> CGFloat {
     hypot(a.x - b.x, a.y - b.y)
+}
+
+func isUndoShortcut(_ event: NSEvent) -> Bool {
+    let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+    return event.charactersIgnoringModifiers?.lowercased() == "z" && (modifiers.contains(.control) || modifiers.contains(.command))
 }
 
 private func distanceFromPoint(_ point: NSPoint, toLineSegmentStart start: NSPoint, end: NSPoint) -> CGFloat {
