@@ -28,6 +28,25 @@ final class SelectionOverlayView: NSView {
 
     override func viewDidMoveToWindow() {
         window?.makeFirstResponder(self)
+        activateCrosshairCursor()
+    }
+
+    override func resetCursorRects() {
+        addCursorRect(bounds, cursor: .crosshair)
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.crosshair.set()
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        NSCursor.crosshair.set()
+    }
+
+    func activateCrosshairCursor() {
+        window?.invalidateCursorRects(for: self)
+        window?.resetCursorRects()
+        NSCursor.crosshair.set()
     }
 
     override func mouseDown(with event: NSEvent) {

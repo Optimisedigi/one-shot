@@ -17,4 +17,4 @@ scripts/build-app.sh
 open .build/Shotter.app
 ```
 
-macOS requires Screen Recording permission for capture. If capture is blank or denied, grant permission in System Settings → Privacy & Security → Screen & System Audio Recording, then restart the app.
+The build script creates and reuses a local code-signing identity named `Shotter Local Development` so macOS Screen Recording permission can persist across rebuilds. macOS still requires Screen Recording permission for first use; if capture is blank or denied, grant permission in System Settings → Privacy & Security → Screen & System Audio Recording, then restart the app.

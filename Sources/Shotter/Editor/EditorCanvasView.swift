@@ -1,6 +1,6 @@
 import AppKit
 
-final class EditorCanvasView: NSView {
+final class EditorCanvasView: NSView, NSTextFieldDelegate {
     weak var windowController: EditorWindowController?
 
     var tool: EditorTool = .rectangle {
@@ -13,7 +13,19 @@ final class EditorCanvasView: NSView {
     private var dragCurrentImagePoint: NSPoint?
     private var activeTextField: NSTextField?
     private var activeTextOrigin: NSPoint?
+    private var selectedAnnotationIndex: Int? {
+        didSet { onSelectionChange?(selectedAnnotationColor) }
+    }
+    private var movingTextIndex: Int?
+    private var movingTextOffset: NSPoint = .zero
     private var zoom: CGFloat = 1
+
+    var onSelectionChange: ((NSColor?) -> Void)?
+
+    var selectedAnnotationColor: NSColor? {
+        guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else { return nil }
+        return annotations[selectedAnnotationIndex].color
+    }
 
     init(image: NSImage) {
         self.baseImage = image
@@ -54,6 +66,16 @@ final class EditorCanvasView: NSView {
         window?.makeFirstResponder(self)
         commitActiveText()
         guard let point = imagePoint(from: event.locationInWindow) else { return }
+        if let annotationIndex = annotationIndex(at: point) {
+            selectedAnnotationIndex = annotationIndex
+            if tool == .text, case .text(_, let origin) = annotations[annotationIndex].kind {
+                movingTextIndex = annotationIndex
+                movingTextOffset = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+            }
+            needsDisplay = true
+            return
+        }
+        selectedAnnotationIndex = nil
         if tool == .text {
             beginInlineText(at: point)
             return
@@ -64,11 +86,22 @@ final class EditorCanvasView: NSView {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        dragCurrentImagePoint = imagePoint(from: event.locationInWindow)
+        guard let point = imagePoint(from: event.locationInWindow) else { return }
+        if let movingTextIndex {
+            moveTextAnnotation(at: movingTextIndex, to: NSPoint(x: point.x - movingTextOffset.x, y: point.y - movingTextOffset.y))
+        } else {
+            dragCurrentImagePoint = point
+        }
         needsDisplay = true
     }
 
     override func mouseUp(with event: NSEvent) {
+        if let movingTextIndex {
+            selectedAnnotationIndex = movingTextIndex
+            self.movingTextIndex = nil
+            needsDisplay = true
+            return
+        }
         guard let start = dragStartImagePoint, let end = imagePoint(from: event.locationInWindow) else { return }
         defer {
             dragStartImagePoint = nil
@@ -80,8 +113,10 @@ final class EditorCanvasView: NSView {
         switch tool {
         case .rectangle where rect.width > 2 && rect.height > 2:
             annotations.append(Annotation(kind: .rectangle(rect), lineWidth: 6))
+            selectedAnnotationIndex = annotations.indices.last
         case .arrow where distance(start, end) > 2:
             annotations.append(Annotation(kind: .arrow(start: start, end: end)))
+            selectedAnnotationIndex = annotations.indices.last
         default:
             return
         }
@@ -91,8 +126,11 @@ final class EditorCanvasView: NSView {
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "s" {
             commitActiveText()
             savePNGToDesktop(closeAfterSave: true)
+        } else if event.keyCode == 53 {
+            cancelEditingOrClose()
         } else if event.keyCode == 51, !annotations.isEmpty {
             annotations.removeLast()
+            selectedAnnotationIndex = annotations.indices.last
             needsDisplay = true
         } else if event.charactersIgnoringModifiers == "+" || event.charactersIgnoringModifiers == "=" {
             zoom = min(zoom * 1.2, 6)
@@ -105,6 +143,14 @@ final class EditorCanvasView: NSView {
             needsDisplay = true
         } else {
             super.keyDown(with: event)
+        }
+    }
+
+    func cancelEditingOrClose() {
+        if activeTextField != nil {
+            commitActiveText()
+        } else {
+            window?.close()
         }
     }
 
@@ -157,7 +203,7 @@ final class EditorCanvasView: NSView {
     }
 
     private func drawAnnotations(_ annotations: [Annotation]) {
-        for annotation in annotations {
+        for (index, annotation) in annotations.enumerated() {
             switch annotation.kind {
             case .rectangle(let rect):
                 drawRectangle(rect, color: annotation.color, lineWidth: 6)
@@ -166,19 +212,24 @@ final class EditorCanvasView: NSView {
             case .text(let text, let origin):
                 drawText(text, at: origin, color: annotation.color)
             }
+            if index == selectedAnnotationIndex {
+                drawSelectionHighlight(for: annotation)
+            }
         }
     }
 
     private func beginInlineText(at imagePoint: NSPoint) {
         commitActiveText()
         let fieldOrigin = viewPoint(fromImagePoint: imagePoint)
-        let field = NSTextField(frame: NSRect(x: fieldOrigin.x, y: fieldOrigin.y - 4, width: 280, height: 36))
+        let field = EscapeCommittingTextField(frame: NSRect(x: fieldOrigin.x, y: fieldOrigin.y - 4, width: 280, height: 36))
+        field.onEscape = { [weak self] in self?.commitActiveText() }
         field.isBordered = false
         field.drawsBackground = false
         field.backgroundColor = .clear
         field.textColor = .systemRed
         field.font = .systemFont(ofSize: 28, weight: .bold)
         field.focusRingType = .none
+        field.delegate = self
         field.target = self
         field.action = #selector(commitActiveTextAction)
         addSubview(field)
@@ -191,17 +242,89 @@ final class EditorCanvasView: NSView {
         commitActiveText()
     }
 
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard commandSelector == #selector(NSResponder.cancelOperation(_:)) else { return false }
+        commitActiveText()
+        return true
+    }
+
     private func commitActiveText() {
         guard let field = activeTextField else { return }
         let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty, let origin = activeTextOrigin {
             annotations.append(Annotation(kind: .text(text, origin: origin)))
+            selectedAnnotationIndex = annotations.indices.last
         }
         field.removeFromSuperview()
         activeTextField = nil
         activeTextOrigin = nil
         window?.makeFirstResponder(self)
         needsDisplay = true
+    }
+
+    func applyColorToSelectedAnnotation(_ color: NSColor) {
+        guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else { return }
+        annotations[selectedAnnotationIndex].color = color
+        onSelectionChange?(color)
+        needsDisplay = true
+    }
+
+    private func annotationIndex(at point: NSPoint) -> Int? {
+        annotations.indices.reversed().first { annotationHitTest(annotations[$0], at: point) }
+    }
+
+    private func annotationHitTest(_ annotation: Annotation, at point: NSPoint) -> Bool {
+        switch annotation.kind {
+        case .rectangle(let rect):
+            return rect.insetBy(dx: -8, dy: -8).contains(point)
+        case .arrow(let start, let end):
+            return distanceFromPoint(point, toLineSegmentStart: start, end: end) <= 10
+        case .text(let text, let origin):
+            return textBounds(for: text, at: origin).contains(point)
+        }
+    }
+
+    private func moveTextAnnotation(at index: Int, to origin: NSPoint) {
+        guard annotations.indices.contains(index), case .text(let text, _) = annotations[index].kind else { return }
+        annotations[index].kind = .text(text, origin: origin)
+    }
+
+    private func textBounds(for text: String, at origin: NSPoint) -> NSRect {
+        let size = text.size(withAttributes: Self.textAttributes(color: .systemRed))
+        return NSRect(x: origin.x, y: origin.y, width: size.width, height: size.height).insetBy(dx: -8, dy: -8)
+    }
+
+    private func drawSelectionHighlight(for annotation: Annotation) {
+        NSColor.systemBlue.setStroke()
+        switch annotation.kind {
+        case .rectangle(let rect):
+            drawDashedRect(rect.insetBy(dx: -6, dy: -6))
+        case .arrow(let start, let end):
+            let path = NSBezierPath()
+            path.move(to: start)
+            path.line(to: end)
+            path.lineWidth = 2
+            path.setLineDash([6, 4], count: 2, phase: 0)
+            path.stroke()
+        case .text(let text, let origin):
+            drawDashedRect(textBounds(for: text, at: origin))
+        }
+    }
+
+    private func drawDashedRect(_ rect: NSRect) {
+        let path = NSBezierPath(rect: rect)
+        path.lineWidth = 2
+        path.setLineDash([6, 4], count: 2, phase: 0)
+        path.stroke()
+    }
+
+    class func textAttributes(color: NSColor) -> [NSAttributedString.Key: Any] {
+        [
+            .font: NSFont.systemFont(ofSize: 28, weight: .bold),
+            .foregroundColor: color,
+            .strokeColor: NSColor.white,
+            .strokeWidth: -2
+        ]
     }
 
     func savePNGToDesktop(closeAfterSave: Bool = false) {
@@ -241,4 +364,31 @@ final class EditorCanvasView: NSView {
 
 private func distance(_ a: NSPoint, _ b: NSPoint) -> CGFloat {
     hypot(a.x - b.x, a.y - b.y)
+}
+
+private func distanceFromPoint(_ point: NSPoint, toLineSegmentStart start: NSPoint, end: NSPoint) -> CGFloat {
+    let dx = end.x - start.x
+    let dy = end.y - start.y
+    let lengthSquared = dx * dx + dy * dy
+    guard lengthSquared > 0 else { return distance(point, start) }
+
+    let t = max(CGFloat(0), min(CGFloat(1), ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared))
+    let projection = NSPoint(x: start.x + t * dx, y: start.y + t * dy)
+    return distance(point, projection)
+}
+
+private final class EscapeCommittingTextField: NSTextField {
+    var onEscape: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            onEscape?()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
+
+    override func cancelOperation(_ sender: Any?) {
+        onEscape?()
+    }
 }

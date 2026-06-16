@@ -3,10 +3,14 @@ import AppKit
 final class EditorToolbarView: NSView {
     private weak var canvasView: EditorCanvasView?
     private var buttons: [NSButton] = []
+    private let colorWell = NSColorWell()
 
     init(canvasView: EditorCanvasView) {
         self.canvasView = canvasView
         super.init(frame: .zero)
+        canvasView.onSelectionChange = { [weak self] color in
+            self?.updateColorWell(with: color)
+        }
         setup()
     }
 
@@ -37,6 +41,18 @@ final class EditorToolbarView: NSView {
         }
 
         stack.addArrangedSubview(separator())
+
+        let colorLabel = NSTextField(labelWithString: "Color")
+        colorLabel.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(colorLabel)
+        colorWell.color = .systemRed
+        colorWell.isEnabled = false
+        colorWell.target = self
+        colorWell.action = #selector(changeSelectedColor(_:))
+        colorWell.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        stack.addArrangedSubview(colorWell)
+
+        stack.addArrangedSubview(separator())
         let saveButton = NSButton(title: "💾", target: self, action: #selector(savePNG))
         saveButton.toolTip = "Save As…"
         saveButton.font = .systemFont(ofSize: 22, weight: .semibold)
@@ -58,8 +74,19 @@ final class EditorToolbarView: NSView {
         updateButtons()
     }
 
+    @objc private func changeSelectedColor(_ sender: NSColorWell) {
+        canvasView?.applyColorToSelectedAnnotation(sender.color)
+    }
+
     @objc private func savePNG() {
         canvasView?.savePNG()
+    }
+
+    private func updateColorWell(with color: NSColor?) {
+        colorWell.isEnabled = color != nil
+        if let color {
+            colorWell.color = color
+        }
     }
 
     private func updateButtons() {

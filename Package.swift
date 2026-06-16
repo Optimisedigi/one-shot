@@ -15,6 +15,7 @@ let package = Package(
                 .linkedFramework("Carbon"),
                 .linkedFramework("CoreGraphics"),
                 .linkedFramework("CoreImage"),
+                .linkedFramework("ServiceManagement"),
                 .linkedFramework("UniformTypeIdentifiers")
             ]
         )

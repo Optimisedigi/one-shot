@@ -32,13 +32,7 @@ extension EditorCanvasView {
     }
 
     func drawText(_ text: String, at origin: NSPoint, color: NSColor) {
-        let attributes: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 28, weight: .bold),
-            .foregroundColor: color,
-            .strokeColor: NSColor.white,
-            .strokeWidth: -2
-        ]
-        text.draw(at: origin, withAttributes: attributes)
+        text.draw(at: origin, withAttributes: Self.textAttributes(color: color))
     }
 
 }

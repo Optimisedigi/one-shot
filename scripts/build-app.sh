@@ -3,6 +3,11 @@ set -euo pipefail
 
 swift build -c release
 
+CODESIGN_IDENTITY="${SHOTTER_CODESIGN_IDENTITY:-Shotter Local Development}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+"$SCRIPT_DIR/create-dev-certificate.sh"
+
 APP_DIR=".build/Shotter.app"
 CONTENTS="$APP_DIR/Contents"
 MACOS="$CONTENTS/MacOS"
@@ -42,4 +47,12 @@ cat > "$CONTENTS/Info.plist" <<'PLIST'
 PLIST
 
 chmod +x "$MACOS/Shotter"
-echo "Built $APP_DIR"
+
+codesign \
+    --force \
+    --deep \
+    --options runtime \
+    --sign "$CODESIGN_IDENTITY" \
+    "$APP_DIR"
+
+echo "Built and signed $APP_DIR with identity '$CODESIGN_IDENTITY'"

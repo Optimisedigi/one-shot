@@ -3,9 +3,10 @@ import AppKit
 final class PreferencesWindowController: NSWindowController {
     var onShortcutChanged: ((ShortcutChoice, ShortcutChoice) -> Bool)?
     private let shortcutPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private let launchAtLoginButton = NSButton(checkboxWithTitle: "Open Shotter at login", target: nil, action: nil)
 
     init() {
-        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 360, height: 140))
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 190))
         let window = NSWindow(
             contentRect: contentView.frame,
             styleMask: [.titled, .closable],
@@ -48,9 +49,15 @@ final class PreferencesWindowController: NSWindowController {
         }
         selectCurrentShortcut()
 
+        launchAtLoginButton.translatesAutoresizingMaskIntoConstraints = false
+        launchAtLoginButton.target = self
+        launchAtLoginButton.action = #selector(launchAtLoginChanged)
+        launchAtLoginButton.state = LaunchAtLoginSettings.isEnabled ? .on : .off
+
         contentView.addSubview(titleLabel)
         contentView.addSubview(shortcutPopup)
         contentView.addSubview(helperLabel)
+        contentView.addSubview(launchAtLoginButton)
 
         NSLayoutConstraint.activate([
             titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
@@ -62,7 +69,11 @@ final class PreferencesWindowController: NSWindowController {
 
             helperLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
             helperLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
-            helperLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 18)
+            helperLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 18),
+
+            launchAtLoginButton.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            launchAtLoginButton.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -24),
+            launchAtLoginButton.topAnchor.constraint(equalTo: helperLabel.bottomAnchor, constant: 24)
         ])
     }
 
@@ -82,6 +93,17 @@ final class PreferencesWindowController: NSWindowController {
         if onShortcutChanged?(previous, choice) == false {
             ShortcutSettings.captureShortcut = previous
             selectCurrentShortcut()
+        }
+    }
+
+    @objc private func launchAtLoginChanged() {
+        let shouldEnable = launchAtLoginButton.state == .on
+        do {
+            try LaunchAtLoginSettings.setEnabled(shouldEnable)
+            launchAtLoginButton.state = LaunchAtLoginSettings.isEnabled ? .on : .off
+        } catch {
+            launchAtLoginButton.state = LaunchAtLoginSettings.isEnabled ? .on : .off
+            NSAlert.show(message: "Could not update startup setting", informativeText: error.localizedDescription)
         }
     }
 }

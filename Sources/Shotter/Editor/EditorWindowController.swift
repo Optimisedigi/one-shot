@@ -27,6 +27,9 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window.onQuickSave = { [weak self] in
             self?.canvasView.savePNGToDesktop(closeAfterSave: true)
         }
+        window.onCancel = { [weak self] in
+            self?.canvasView.cancelEditingOrClose()
+        }
         window.delegate = self
         canvasView.windowController = self
     }
@@ -42,6 +45,19 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
 private final class EditorWindow: NSWindow {
     var onQuickSave: (() -> Void)?
+    var onCancel: (() -> Void)?
+
+    override func cancelOperation(_ sender: Any?) {
+        onCancel?()
+    }
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 53 {
+            onCancel?()
+        } else {
+            super.keyDown(with: event)
+        }
+    }
 
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
