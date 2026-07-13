@@ -27,6 +27,13 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window.onQuickSave = { [weak self] in
             self?.canvasView.savePNGToDesktop(closeAfterSave: true)
         }
+        window.canCopyImage = { [weak self] in
+            guard let self else { return false }
+            return !self.canvasView.isEditingText
+        }
+        window.onCopy = { [weak self] in
+            self?.canvasView.copyToClipboard()
+        }
         window.onCancel = { [weak self] in
             self?.canvasView.cancelEditingOrClose()
         }
@@ -48,6 +55,8 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
 
 private final class EditorWindow: NSWindow {
     var onQuickSave: (() -> Void)?
+    var canCopyImage: (() -> Bool)?
+    var onCopy: (() -> Void)?
     var onCancel: (() -> Void)?
     var onUndo: (() -> Void)?
 
@@ -73,6 +82,12 @@ private final class EditorWindow: NSWindow {
         if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
            event.charactersIgnoringModifiers?.lowercased() == "s" {
             onQuickSave?()
+            return true
+        }
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "c",
+           canCopyImage?() == true {
+            onCopy?()
             return true
         }
         return super.performKeyEquivalent(with: event)

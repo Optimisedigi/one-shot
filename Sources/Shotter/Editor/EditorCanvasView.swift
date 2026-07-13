@@ -1,6 +1,8 @@
 import AppKit
 
-final class EditorCanvasView: NSView, NSTextFieldDelegate {
+final class EditorCanvasView: NSView {
+    private static let resizeDragSensitivity: CGFloat = 0.35
+
     weak var windowController: EditorWindowController?
 
     var tool: EditorTool = .rectangle {
@@ -10,22 +12,50 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
     private var baseImage: NSImage
     private var annotations: [Annotation] = []
     private var undoStack: [[Annotation]] = []
-    private var dragStartImagePoint: NSPoint?
-    private var dragCurrentImagePoint: NSPoint?
-    private var activeTextField: NSTextField?
+    private enum DragMode {
+        case drawing(start: NSPoint, current: NSPoint)
+        case moving(index: Int, offset: NSPoint)
+        case resizing(index: Int, handle: ResizeHandle, originalBounds: NSRect)
+    }
+
+    private enum ResizeHandle: CaseIterable {
+        case bottomLeft
+        case bottomRight
+        case topLeft
+        case topRight
+    }
+
+    private struct PixelateCacheKey: Hashable {
+        let minX: CGFloat
+        let minY: CGFloat
+        let width: CGFloat
+        let height: CGFloat
+        let scale: CGFloat
+    }
+
+    private var dragMode: DragMode?
+    private var pixelateCache: [PixelateCacheKey: NSImage] = [:]
+    private var activeTextView: MultilineCommittingTextView?
     private var activeTextOrigin: NSPoint?
     private var selectedAnnotationIndex: Int? {
-        didSet { onSelectionChange?(selectedAnnotationColor) }
+        didSet { onSelectionChange?(selectedAnnotationColor, selectedAnnotationWeight) }
     }
-    private var movingTextIndex: Int?
-    private var movingTextOffset: NSPoint = .zero
     private var zoom: CGFloat = 1
 
-    var onSelectionChange: ((NSColor?) -> Void)?
+    var onSelectionChange: ((NSColor?, CGFloat?) -> Void)?
 
     var selectedAnnotationColor: NSColor? {
         guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else { return nil }
         return annotations[selectedAnnotationIndex].color
+    }
+
+    var selectedAnnotationWeight: CGFloat? {
+        guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else { return nil }
+        return weight(for: annotations[selectedAnnotationIndex])
+    }
+
+    var isEditingText: Bool {
+        activeTextView != nil
     }
 
     init(image: NSImage) {
@@ -73,13 +103,23 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
         window?.makeFirstResponder(self)
         commitActiveText()
         guard let point = imagePoint(from: event.locationInWindow) else { return }
+        if let handleHit = resizeHandleHit(at: point) {
+            recordUndoState()
+            selectedAnnotationIndex = handleHit.index
+            dragMode = .resizing(index: handleHit.index, handle: handleHit.handle, originalBounds: annotationBounds(annotations[handleHit.index]))
+            needsDisplay = true
+            return
+        }
         if let annotationIndex = annotationIndex(at: point) {
-            selectedAnnotationIndex = annotationIndex
-            if tool == .text, case .text(_, let origin) = annotations[annotationIndex].kind {
-                recordUndoState()
-                movingTextIndex = annotationIndex
-                movingTextOffset = NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+            let annotation = annotations[annotationIndex]
+            if tool == .text, !annotation.isText {
+                selectedAnnotationIndex = nil
+                beginInlineText(at: point)
+                return
             }
+            selectedAnnotationIndex = annotationIndex
+            recordUndoState()
+            dragMode = .moving(index: annotationIndex, offset: moveOffset(for: annotation, at: point))
             needsDisplay = true
             return
         }
@@ -88,48 +128,59 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
             beginInlineText(at: point)
             return
         }
-        dragStartImagePoint = point
-        dragCurrentImagePoint = point
+        if tool == .step {
+            placeStep(at: point)
+            return
+        }
+        dragMode = .drawing(start: point, current: point)
         needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
         let point = imagePoint(from: event.locationInWindow, clamped: true)
-        if let movingTextIndex {
-            moveTextAnnotation(at: movingTextIndex, to: NSPoint(x: point.x - movingTextOffset.x, y: point.y - movingTextOffset.y))
-        } else {
-            dragCurrentImagePoint = point
+        switch dragMode {
+        case .drawing(let start, _):
+            dragMode = .drawing(start: start, current: point)
+        case .moving(let index, let offset):
+            moveAnnotation(at: index, to: point, offset: offset)
+        case .resizing(let index, let handle, let originalBounds):
+            resizeAnnotation(at: index, handle: handle, originalBounds: originalBounds, to: point)
+            onSelectionChange?(selectedAnnotationColor, selectedAnnotationWeight)
+        case nil:
+            break
         }
         needsDisplay = true
     }
 
     override func mouseUp(with event: NSEvent) {
-        if let movingTextIndex {
-            selectedAnnotationIndex = movingTextIndex
-            self.movingTextIndex = nil
-            needsDisplay = true
-            return
-        }
-        guard let start = dragStartImagePoint else { return }
-        let end = imagePoint(from: event.locationInWindow, clamped: true)
+        guard let dragMode else { return }
         defer {
-            dragStartImagePoint = nil
-            dragCurrentImagePoint = nil
+            self.dragMode = nil
             needsDisplay = true
         }
 
-        let rect = Geometry.normalizedRect(from: start, to: end)
-        switch tool {
-        case .rectangle where rect.width > 2 && rect.height > 2:
-            recordUndoState()
-            annotations.append(Annotation(kind: .rectangle(rect), lineWidth: 6))
-            selectedAnnotationIndex = annotations.indices.last
-        case .arrow where distance(start, end) > 2:
-            recordUndoState()
-            annotations.append(Annotation(kind: .arrow(start: start, end: end)))
-            selectedAnnotationIndex = annotations.indices.last
-        default:
-            return
+        switch dragMode {
+        case .drawing(let start, _):
+            let end = imagePoint(from: event.locationInWindow, clamped: true)
+            let rect = Geometry.normalizedRect(from: start, to: end)
+            switch tool {
+            case .rectangle where rect.width > 2 && rect.height > 2:
+                recordUndoState()
+                annotations.append(Annotation(kind: .rectangle(rect), lineWidth: Annotation.defaultRectangleLineWidth))
+                selectedAnnotationIndex = annotations.indices.last
+            case .arrow where distance(start, end) > 2:
+                recordUndoState()
+                annotations.append(Annotation(kind: .arrow(start: start, end: end), lineWidth: Annotation.defaultArrowLineWidth))
+                selectedAnnotationIndex = annotations.indices.last
+            case .pixelate where rect.width > 2 && rect.height > 2:
+                recordUndoState()
+                annotations.append(Annotation(kind: .pixelate(rect), lineWidth: Annotation.defaultPixelBlockScale))
+                selectedAnnotationIndex = annotations.indices.last
+            default:
+                return
+            }
+        case .moving(let index, _), .resizing(let index, _, _):
+            selectedAnnotationIndex = index
         }
     }
 
@@ -137,6 +188,8 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "s" {
             commitActiveText()
             savePNGToDesktop(closeAfterSave: true)
+        } else if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "c", activeTextView == nil {
+            copyToClipboard()
         } else if isUndoShortcut(event) {
             undoLastChange()
         } else if event.keyCode == 53 {
@@ -158,7 +211,7 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
     }
 
     func cancelEditingOrClose() {
-        if activeTextField != nil {
+        if activeTextView != nil {
             commitActiveText()
         } else {
             window?.close()
@@ -168,6 +221,7 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
     func undoLastChange() {
         commitActiveText()
         guard let previousAnnotations = undoStack.popLast() else { return }
+        pixelateCache.removeAll()
         annotations = previousAnnotations
         selectedAnnotationIndex = annotations.indices.last
         needsDisplay = true
@@ -176,12 +230,19 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
     private func deleteLastAnnotation() {
         recordUndoState()
         annotations.removeLast()
+        pixelateCache.removeAll()
         selectedAnnotationIndex = annotations.indices.last
         needsDisplay = true
     }
 
     private func recordUndoState() {
+        pixelateCache.removeAll()
         undoStack.append(annotations)
+    }
+
+    func copyToClipboard() {
+        commitActiveText()
+        renderFinalImage().copyToPasteboard()
     }
 
     func savePNG() {
@@ -236,13 +297,20 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
     }
 
     private func drawPreview() {
-        guard let start = dragStartImagePoint, let current = dragCurrentImagePoint else { return }
+        guard case .drawing(let start, let current) = dragMode else { return }
         switch tool {
         case .rectangle:
-            drawRectangle(Geometry.normalizedRect(from: start, to: current), color: .systemRed, lineWidth: 6)
+            drawRectangle(Geometry.normalizedRect(from: start, to: current), color: .systemRed, lineWidth: Annotation.defaultRectangleLineWidth)
         case .arrow:
-            drawArrow(start: start, end: current, color: .systemRed, lineWidth: 4)
+            drawArrow(start: start, end: current, color: .systemRed, lineWidth: Annotation.defaultArrowLineWidth)
         case .text:
+            break
+        case .pixelate:
+            let rect = Geometry.normalizedRect(from: start, to: current)
+            NSColor.systemRed.withAlphaComponent(0.18).setFill()
+            rect.fill()
+            drawRectangle(rect, color: .systemRed, lineWidth: Annotation.defaultRectangleLineWidth)
+        case .step:
             break
         }
     }
@@ -251,11 +319,15 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
         for (index, annotation) in annotations.enumerated() {
             switch annotation.kind {
             case .rectangle(let rect):
-                drawRectangle(rect, color: annotation.color, lineWidth: 6)
+                drawRectangle(rect, color: annotation.color, lineWidth: annotation.lineWidth)
             case .arrow(let start, let end):
                 drawArrow(start: start, end: end, color: annotation.color, lineWidth: annotation.lineWidth)
-            case .text(let text, let origin):
-                drawText(text, at: origin, color: annotation.color)
+            case .text(let text, let origin, let fontSize):
+                drawText(text, at: origin, color: annotation.color, fontSize: fontSize)
+            case .pixelate(let rect):
+                drawCachedPixelate(rect, scale: annotation.lineWidth)
+            case .step(let number, let center, let radius):
+                drawStep(number: number, center: center, radius: radius, color: annotation.color)
             }
             if index == selectedAnnotationIndex {
                 drawSelectionHighlight(for: annotation)
@@ -263,46 +335,67 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
         }
     }
 
+    private func placeStep(at imagePoint: NSPoint) {
+        recordUndoState()
+        annotations.append(Annotation(kind: .step(number: nextStepNumber(), center: imagePoint, radius: Annotation.defaultStepRadius)))
+        selectedAnnotationIndex = annotations.indices.last
+        needsDisplay = true
+    }
+
+    private func nextStepNumber() -> Int {
+        annotations.filter { annotation in
+            if case .step = annotation.kind { return true }
+            return false
+        }.count + 1
+    }
+
+    private func drawCachedPixelate(_ rect: NSRect, scale: CGFloat) {
+        let key = PixelateCacheKey(minX: rect.minX, minY: rect.minY, width: rect.width, height: rect.height, scale: scale)
+        if let image = pixelateCache[key] {
+            image.draw(in: rect, from: NSRect(origin: .zero, size: image.size), operation: .copy, fraction: 1)
+            return
+        }
+        if let image = PixelateRenderer.pixelatedImage(from: baseImage, rect: rect, scale: scale) {
+            pixelateCache[key] = image
+            image.draw(in: rect, from: NSRect(origin: .zero, size: image.size), operation: .copy, fraction: 1)
+        } else {
+            NSColor.black.withAlphaComponent(0.85).setFill()
+            rect.fill()
+        }
+    }
+
     private func beginInlineText(at imagePoint: NSPoint) {
         commitActiveText()
         let fieldOrigin = viewPoint(fromImagePoint: imagePoint)
-        let field = EscapeCommittingTextField(frame: NSRect(x: fieldOrigin.x, y: fieldOrigin.y - 4, width: 280, height: 36))
-        field.onEscape = { [weak self] in self?.commitActiveText() }
-        field.isBordered = false
-        field.drawsBackground = false
-        field.backgroundColor = .clear
-        field.textColor = .systemRed
-        field.font = .systemFont(ofSize: 28, weight: .bold)
-        field.focusRingType = .none
-        field.delegate = self
-        field.target = self
-        field.action = #selector(commitActiveTextAction)
-        addSubview(field)
-        activeTextField = field
+        let textView = MultilineCommittingTextView(frame: NSRect(x: fieldOrigin.x, y: fieldOrigin.y - 4, width: 280, height: 112))
+        textView.onEscape = { [weak self] in self?.commitActiveText() }
+        textView.drawsBackground = false
+        textView.isRichText = false
+        textView.allowsUndo = true
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: textView.bounds.width, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainerInset = .zero
+        textView.textColor = .systemRed
+        textView.insertionPointColor = .systemRed
+        textView.font = .systemFont(ofSize: Annotation.defaultTextFontSize, weight: .bold)
+        addSubview(textView)
+        activeTextView = textView
         activeTextOrigin = imagePoint
-        window?.makeFirstResponder(field)
-    }
-
-    @objc private func commitActiveTextAction() {
-        commitActiveText()
-    }
-
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        guard commandSelector == #selector(NSResponder.cancelOperation(_:)) else { return false }
-        commitActiveText()
-        return true
+        window?.makeFirstResponder(textView)
     }
 
     private func commitActiveText() {
-        guard let field = activeTextField else { return }
-        let text = field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let textView = activeTextView else { return }
+        let text = textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty, let origin = activeTextOrigin {
             recordUndoState()
-            annotations.append(Annotation(kind: .text(text, origin: origin)))
+            annotations.append(Annotation(kind: .text(text, origin: origin, fontSize: Annotation.defaultTextFontSize)))
             selectedAnnotationIndex = annotations.indices.last
         }
-        field.removeFromSuperview()
-        activeTextField = nil
+        textView.removeFromSuperview()
+        activeTextView = nil
         activeTextOrigin = nil
         window?.makeFirstResponder(self)
         needsDisplay = true
@@ -312,33 +405,222 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
         guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else { return }
         recordUndoState()
         annotations[selectedAnnotationIndex].color = color
-        onSelectionChange?(color)
+        onSelectionChange?(color, selectedAnnotationWeight)
         needsDisplay = true
+    }
+
+    func applyWeightToSelectedAnnotation(_ weight: CGFloat) {
+        guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else { return }
+        recordUndoState()
+        switch annotations[selectedAnnotationIndex].kind {
+        case .rectangle, .arrow:
+            annotations[selectedAnnotationIndex].lineWidth = clamp(weight, min: Annotation.minimumLineWidth, max: Annotation.maximumLineWidth)
+        case .pixelate:
+            annotations[selectedAnnotationIndex].lineWidth = clamp(weight, min: Annotation.minimumPixelBlockScale, max: Annotation.maximumPixelBlockScale)
+        case .text(let text, let origin, _):
+            annotations[selectedAnnotationIndex].kind = .text(text, origin: origin, fontSize: clamp(weight, min: Annotation.minimumTextFontSize, max: Annotation.maximumTextFontSize))
+        case .step(let number, let center, _):
+            annotations[selectedAnnotationIndex].kind = .step(number: number, center: center, radius: clamp(weight, min: Annotation.minimumStepRadius, max: Annotation.maximumStepRadius))
+        }
+        onSelectionChange?(selectedAnnotationColor, selectedAnnotationWeight)
+        needsDisplay = true
+    }
+
+    private func weight(for annotation: Annotation) -> CGFloat {
+        switch annotation.kind {
+        case .rectangle, .arrow, .pixelate:
+            return annotation.lineWidth
+        case .text(_, _, let fontSize):
+            return fontSize
+        case .step(_, _, let radius):
+            return radius
+        }
     }
 
     private func annotationIndex(at point: NSPoint) -> Int? {
         annotations.indices.reversed().first { annotationHitTest(annotations[$0], at: point) }
     }
 
-    private func annotationHitTest(_ annotation: Annotation, at point: NSPoint) -> Bool {
+    private func annotationBounds(_ annotation: Annotation) -> NSRect {
         switch annotation.kind {
-        case .rectangle(let rect):
-            return rect.insetBy(dx: -8, dy: -8).contains(point)
+        case .rectangle(let rect), .pixelate(let rect):
+            return rect
         case .arrow(let start, let end):
-            return distanceFromPoint(point, toLineSegmentStart: start, end: end) <= 10
-        case .text(let text, let origin):
-            return textBounds(for: text, at: origin).contains(point)
+            return Geometry.normalizedRect(from: start, to: end)
+        case .text(let text, let origin, let fontSize):
+            return textBounds(for: text, at: origin, fontSize: fontSize)
+        case .step(_, let center, let radius):
+            return stepBounds(center: center, radius: radius)
         }
     }
 
-    private func moveTextAnnotation(at index: Int, to origin: NSPoint) {
-        guard annotations.indices.contains(index), case .text(let text, _) = annotations[index].kind else { return }
-        annotations[index].kind = .text(text, origin: origin)
+    private func annotationHitTest(_ annotation: Annotation, at point: NSPoint) -> Bool {
+        switch annotation.kind {
+        case .rectangle(let rect), .pixelate(let rect):
+            return rect.insetBy(dx: -8, dy: -8).contains(point)
+        case .arrow(let start, let end):
+            return distanceFromPoint(point, toLineSegmentStart: start, end: end) <= 10
+        case .text(let text, let origin, let fontSize):
+            return textBounds(for: text, at: origin, fontSize: fontSize).contains(point)
+        case .step(_, let center, let radius):
+            return distance(point, center) <= radius + 4
+        }
     }
 
-    private func textBounds(for text: String, at origin: NSPoint) -> NSRect {
-        let size = text.size(withAttributes: Self.textAttributes(color: .systemRed))
+    private func moveAnnotation(at index: Int, to point: NSPoint, offset: NSPoint) {
+        guard annotations.indices.contains(index) else { return }
+        let origin = NSPoint(x: point.x - offset.x, y: point.y - offset.y)
+        let annotation = annotations[index]
+        switch annotation.kind {
+        case .rectangle(let rect):
+            annotations[index].kind = .rectangle(NSRect(origin: origin, size: rect.size))
+        case .pixelate(let rect):
+            annotations[index].kind = .pixelate(NSRect(origin: origin, size: rect.size))
+        case .arrow(let start, let end):
+            let delta = NSPoint(x: origin.x - start.x, y: origin.y - start.y)
+            annotations[index].kind = .arrow(start: origin, end: NSPoint(x: end.x + delta.x, y: end.y + delta.y))
+        case .text(let text, _, let fontSize):
+            annotations[index].kind = .text(text, origin: origin, fontSize: fontSize)
+        case .step(let number, _, let radius):
+            annotations[index].kind = .step(number: number, center: NSPoint(x: origin.x + radius, y: origin.y + radius), radius: radius)
+        }
+    }
+
+    private func moveOffset(for annotation: Annotation, at point: NSPoint) -> NSPoint {
+        let origin = annotationMoveOrigin(annotation)
+        return NSPoint(x: point.x - origin.x, y: point.y - origin.y)
+    }
+
+    private func annotationMoveOrigin(_ annotation: Annotation) -> NSPoint {
+        switch annotation.kind {
+        case .rectangle(let rect), .pixelate(let rect):
+            return rect.origin
+        case .arrow(let start, _):
+            return start
+        case .text(_, let origin, _):
+            return origin
+        case .step(_, let center, let radius):
+            return NSPoint(x: center.x - radius, y: center.y - radius)
+        }
+    }
+
+    private func textBounds(for text: String, at origin: NSPoint, fontSize: CGFloat) -> NSRect {
+        let size = Self.textSize(text, fontSize: fontSize)
         return NSRect(x: origin.x, y: origin.y, width: size.width, height: size.height).insetBy(dx: -8, dy: -8)
+    }
+
+    private func stepBounds(center: NSPoint, radius: CGFloat) -> NSRect {
+        NSRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
+    }
+
+    private func resizeHandleHit(at point: NSPoint) -> (index: Int, handle: ResizeHandle)? {
+        guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else { return nil }
+        guard annotations[selectedAnnotationIndex].isResizable else { return nil }
+        let bounds = annotationBounds(annotations[selectedAnnotationIndex])
+        return ResizeHandle.allCases.first { handleRect(for: $0, in: bounds).contains(point) }.map { (selectedAnnotationIndex, $0) }
+    }
+
+    private func handleRect(for handle: ResizeHandle, in rect: NSRect) -> NSRect {
+        let center: NSPoint
+        switch handle {
+        case .bottomLeft:
+            center = NSPoint(x: rect.minX, y: rect.minY)
+        case .bottomRight:
+            center = NSPoint(x: rect.maxX, y: rect.minY)
+        case .topLeft:
+            center = NSPoint(x: rect.minX, y: rect.maxY)
+        case .topRight:
+            center = NSPoint(x: rect.maxX, y: rect.maxY)
+        }
+        return NSRect(x: center.x - 5, y: center.y - 5, width: 10, height: 10)
+    }
+
+    private func resizeAnnotation(at index: Int, handle: ResizeHandle, originalBounds: NSRect, to point: NSPoint) {
+        guard annotations.indices.contains(index) else { return }
+        let anchor = anchorPoint(opposite: handle, in: originalBounds)
+        let originalDistance = distance(anchor, cornerPoint(handle, in: originalBounds))
+        guard originalDistance > 0 else { return }
+        let rawScale = max(0.1, distance(anchor, point) / originalDistance)
+        let scale = resizeScale(from: rawScale)
+        switch annotations[index].kind {
+        case .rectangle:
+            let width = max(2, originalBounds.width * scale)
+            let height = max(2, originalBounds.height * scale)
+            let rect = rectFrom(anchor: anchor, handle: handle, size: NSSize(width: width, height: height))
+            annotations[index].kind = .rectangle(rect)
+        case .pixelate:
+            let width = max(2, originalBounds.width * scale)
+            let height = max(2, originalBounds.height * scale)
+            let rect = rectFrom(anchor: anchor, handle: handle, size: NSSize(width: width, height: height))
+            annotations[index].kind = .pixelate(rect)
+        case .text(let text, _, let fontSize):
+            let newFontSize = clamp(fontSize * scale, min: Annotation.minimumTextFontSize, max: Annotation.maximumTextFontSize)
+            let newBounds = textBounds(for: text, at: originalBounds.origin, fontSize: newFontSize)
+            let newOrigin = textOriginForResize(handle: handle, originalBounds: originalBounds, newBounds: newBounds)
+            annotations[index].kind = .text(text, origin: newOrigin, fontSize: newFontSize)
+        case .step(let number, _, let radius):
+            let newRadius = clamp(radius * scale, min: Annotation.minimumStepRadius, max: Annotation.maximumStepRadius)
+            let newBounds = rectFrom(anchor: anchor, handle: handle, size: NSSize(width: newRadius * 2, height: newRadius * 2))
+            annotations[index].kind = .step(number: number, center: NSPoint(x: newBounds.midX, y: newBounds.midY), radius: newRadius)
+        case .arrow:
+            break
+        }
+    }
+
+    private func resizeScale(from rawScale: CGFloat) -> CGFloat {
+        1 + ((rawScale - 1) * Self.resizeDragSensitivity)
+    }
+
+    private func anchorPoint(opposite handle: ResizeHandle, in rect: NSRect) -> NSPoint {
+        switch handle {
+        case .bottomLeft:
+            return NSPoint(x: rect.maxX, y: rect.maxY)
+        case .bottomRight:
+            return NSPoint(x: rect.minX, y: rect.maxY)
+        case .topLeft:
+            return NSPoint(x: rect.maxX, y: rect.minY)
+        case .topRight:
+            return NSPoint(x: rect.minX, y: rect.minY)
+        }
+    }
+
+    private func cornerPoint(_ handle: ResizeHandle, in rect: NSRect) -> NSPoint {
+        switch handle {
+        case .bottomLeft:
+            return NSPoint(x: rect.minX, y: rect.minY)
+        case .bottomRight:
+            return NSPoint(x: rect.maxX, y: rect.minY)
+        case .topLeft:
+            return NSPoint(x: rect.minX, y: rect.maxY)
+        case .topRight:
+            return NSPoint(x: rect.maxX, y: rect.maxY)
+        }
+    }
+
+    private func textOriginForResize(handle: ResizeHandle, originalBounds: NSRect, newBounds: NSRect) -> NSPoint {
+        switch handle {
+        case .bottomLeft:
+            return NSPoint(x: originalBounds.maxX - newBounds.width + 8, y: originalBounds.maxY - newBounds.height + 8)
+        case .bottomRight:
+            return NSPoint(x: originalBounds.minX + 8, y: originalBounds.maxY - newBounds.height + 8)
+        case .topLeft:
+            return NSPoint(x: originalBounds.maxX - newBounds.width + 8, y: originalBounds.minY + 8)
+        case .topRight:
+            return NSPoint(x: originalBounds.minX + 8, y: originalBounds.minY + 8)
+        }
+    }
+
+    private func rectFrom(anchor: NSPoint, handle: ResizeHandle, size: NSSize) -> NSRect {
+        switch handle {
+        case .bottomLeft:
+            return NSRect(x: anchor.x - size.width, y: anchor.y - size.height, width: size.width, height: size.height)
+        case .bottomRight:
+            return NSRect(x: anchor.x, y: anchor.y - size.height, width: size.width, height: size.height)
+        case .topLeft:
+            return NSRect(x: anchor.x - size.width, y: anchor.y, width: size.width, height: size.height)
+        case .topRight:
+            return NSRect(origin: anchor, size: size)
+        }
     }
 
     private func drawSelectionHighlight(for annotation: Annotation) {
@@ -346,6 +628,10 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
         switch annotation.kind {
         case .rectangle(let rect):
             drawDashedRect(rect.insetBy(dx: -6, dy: -6))
+            drawResizeHandles(for: rect)
+        case .pixelate(let rect):
+            drawDashedRect(rect.insetBy(dx: -6, dy: -6))
+            drawResizeHandles(for: rect)
         case .arrow(let start, let end):
             let path = NSBezierPath()
             path.move(to: start)
@@ -353,8 +639,16 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
             path.lineWidth = 2
             path.setLineDash([6, 4], count: 2, phase: 0)
             path.stroke()
-        case .text(let text, let origin):
-            drawDashedRect(textBounds(for: text, at: origin))
+        case .text(let text, let origin, let fontSize):
+            drawDashedRect(textBounds(for: text, at: origin, fontSize: fontSize))
+            drawResizeHandles(for: textBounds(for: text, at: origin, fontSize: fontSize))
+        case .step(_, let center, let radius):
+            let bounds = stepBounds(center: center, radius: radius)
+            let path = NSBezierPath(ovalIn: bounds.insetBy(dx: -6, dy: -6))
+            path.lineWidth = 2
+            path.setLineDash([6, 4], count: 2, phase: 0)
+            path.stroke()
+            drawResizeHandles(for: bounds)
         }
     }
 
@@ -365,13 +659,32 @@ final class EditorCanvasView: NSView, NSTextFieldDelegate {
         path.stroke()
     }
 
-    class func textAttributes(color: NSColor) -> [NSAttributedString.Key: Any] {
+    private func drawResizeHandles(for rect: NSRect) {
+        NSColor.white.setFill()
+        NSColor.systemBlue.setStroke()
+        for handle in ResizeHandle.allCases {
+            let handleRect = handleRect(for: handle, in: rect)
+            let path = NSBezierPath(rect: handleRect)
+            path.fill()
+            path.lineWidth = 1.5
+            path.stroke()
+        }
+    }
+
+    class func textAttributes(color: NSColor, fontSize: CGFloat) -> [NSAttributedString.Key: Any] {
         [
-            .font: NSFont.systemFont(ofSize: 28, weight: .bold),
-            .foregroundColor: color,
-            .strokeColor: NSColor.white,
-            .strokeWidth: -2
+            .font: NSFont.systemFont(ofSize: fontSize, weight: .bold),
+            .foregroundColor: color
         ]
+    }
+
+    class func textSize(_ text: String, fontSize: CGFloat) -> NSSize {
+        let bounds = text.boundingRect(
+            with: NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
+            options: [.usesLineFragmentOrigin, .usesFontLeading],
+            attributes: textAttributes(color: .systemRed, fontSize: fontSize)
+        )
+        return NSSize(width: ceil(bounds.width), height: ceil(bounds.height))
     }
 
     func savePNGToDesktop(closeAfterSave: Bool = false) {
@@ -418,6 +731,10 @@ func isUndoShortcut(_ event: NSEvent) -> Bool {
     return event.charactersIgnoringModifiers?.lowercased() == "z" && (modifiers.contains(.control) || modifiers.contains(.command))
 }
 
+private func clamp(_ value: CGFloat, min minimum: CGFloat, max maximum: CGFloat) -> CGFloat {
+    Swift.min(Swift.max(value, minimum), maximum)
+}
+
 private func distanceFromPoint(_ point: NSPoint, toLineSegmentStart start: NSPoint, end: NSPoint) -> CGFloat {
     let dx = end.x - start.x
     let dy = end.y - start.y
@@ -429,7 +746,23 @@ private func distanceFromPoint(_ point: NSPoint, toLineSegmentStart start: NSPoi
     return distance(point, projection)
 }
 
-private final class EscapeCommittingTextField: NSTextField {
+private extension Annotation {
+    var isText: Bool {
+        if case .text = kind { return true }
+        return false
+    }
+
+    var isResizable: Bool {
+        switch kind {
+        case .rectangle, .pixelate, .text, .step:
+            return true
+        case .arrow:
+            return false
+        }
+    }
+}
+
+private final class MultilineCommittingTextView: NSTextView {
     var onEscape: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {

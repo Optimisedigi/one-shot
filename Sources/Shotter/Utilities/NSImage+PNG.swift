@@ -12,6 +12,15 @@ extension NSImage {
         return bitmap.representation(using: .png, properties: [:])
     }
 
+    func copyToPasteboard() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([self])
+        if let pngData = pngData() {
+            pasteboard.setData(pngData, forType: .png)
+        }
+    }
+
     func cropped(to rect: NSRect) -> NSImage? {
         guard let cgImage = cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         let scaleX = CGFloat(cgImage.width) / size.width

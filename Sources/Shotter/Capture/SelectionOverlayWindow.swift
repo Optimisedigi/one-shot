@@ -19,7 +19,9 @@ final class SelectionOverlayController {
             window.selectionView.onCancel = { [weak self] in self?.finish(nil) }
             return window
         }
+        pushCrosshairCursor()
         windows.forEach { window in
+            window.selectionView.activateCrosshairCursor()
             window.orderFrontRegardless()
             window.selectionView.activateCrosshairCursor()
         }
@@ -47,10 +49,10 @@ final class SelectionOverlayController {
 
     private func pushCrosshairCursor() {
         guard !didPushCursor else {
-            NSCursor.crosshair.set()
+            SelectionOverlayView.crosshairCursor.set()
             return
         }
-        NSCursor.crosshair.push()
+        SelectionOverlayView.crosshairCursor.push()
         didPushCursor = true
     }
 

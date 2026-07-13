@@ -1,6 +1,29 @@
 import AppKit
 
 final class SelectionOverlayView: NSView {
+    static let crosshairCursor: NSCursor = {
+        let size = NSSize(width: 31, height: 31)
+        let image = NSImage(size: size)
+        image.lockFocus()
+        NSColor.black.setStroke()
+        let path = NSBezierPath()
+        path.lineWidth = 1.5
+        path.move(to: NSPoint(x: size.width / 2, y: 0))
+        path.line(to: NSPoint(x: size.width / 2, y: size.height))
+        path.move(to: NSPoint(x: 0, y: size.height / 2))
+        path.line(to: NSPoint(x: size.width, y: size.height / 2))
+        path.stroke()
+        NSColor.white.withAlphaComponent(0.9).setStroke()
+        let highlight = NSBezierPath()
+        highlight.lineWidth = 0.5
+        highlight.move(to: NSPoint(x: size.width / 2 + 1.5, y: 0))
+        highlight.line(to: NSPoint(x: size.width / 2 + 1.5, y: size.height))
+        highlight.move(to: NSPoint(x: 0, y: size.height / 2 - 1.5))
+        highlight.line(to: NSPoint(x: size.width, y: size.height / 2 - 1.5))
+        highlight.stroke()
+        image.unlockFocus()
+        return NSCursor(image: image, hotSpot: NSPoint(x: size.width / 2, y: size.height / 2))
+    }()
     var onFinish: ((NSRect) -> Void)?
     var onCancel: (() -> Void)?
 
@@ -34,21 +57,21 @@ final class SelectionOverlayView: NSView {
     }
 
     override func resetCursorRects() {
-        addCursorRect(bounds, cursor: .crosshair)
+        addCursorRect(bounds, cursor: Self.crosshairCursor)
     }
 
     override func cursorUpdate(with event: NSEvent) {
-        NSCursor.crosshair.set()
+        Self.crosshairCursor.set()
     }
 
     override func mouseMoved(with event: NSEvent) {
-        NSCursor.crosshair.set()
+        Self.crosshairCursor.set()
     }
 
     func activateCrosshairCursor() {
         window?.invalidateCursorRects(for: self)
         window?.resetCursorRects()
-        NSCursor.crosshair.set()
+        Self.crosshairCursor.set()
     }
 
     override func mouseDown(with event: NSEvent) {

@@ -4,12 +4,14 @@ final class EditorToolbarView: NSView {
     private weak var canvasView: EditorCanvasView?
     private var buttons: [NSButton] = []
     private let colorWell = NSColorWell()
+    private let weightStepper = NSStepper()
+    private let weightLabel = NSTextField(labelWithString: "—")
 
     init(canvasView: EditorCanvasView) {
         self.canvasView = canvasView
         super.init(frame: .zero)
-        canvasView.onSelectionChange = { [weak self] color in
-            self?.updateColorWell(with: color)
+        canvasView.onSelectionChange = { [weak self] color, weight in
+            self?.updateSelectionControls(color: color, weight: weight)
         }
         setup()
     }
@@ -30,23 +32,12 @@ final class EditorToolbarView: NSView {
         addSubview(stack)
 
         for tool in EditorTool.allCases {
-            let button = NSButton(title: tool.iconTitle, target: self, action: #selector(selectTool(_:)))
+            let button = iconButton(title: tool.iconTitle, target: self, action: #selector(selectTool(_:)))
             button.toolTip = tool.rawValue
-            button.font = .systemFont(ofSize: 22, weight: .semibold)
-            button.bezelStyle = .rounded
             button.identifier = NSUserInterfaceItemIdentifier(tool.rawValue)
-            button.widthAnchor.constraint(equalToConstant: 48).isActive = true
             stack.addArrangedSubview(button)
             buttons.append(button)
         }
-
-        stack.addArrangedSubview(separator())
-        let undoButton = NSButton(title: "↶", target: self, action: #selector(undoLastChange))
-        undoButton.toolTip = "Undo Last Change (⌃Z or ⌘Z)"
-        undoButton.font = .systemFont(ofSize: 22, weight: .semibold)
-        undoButton.bezelStyle = .rounded
-        undoButton.widthAnchor.constraint(equalToConstant: 48).isActive = true
-        stack.addArrangedSubview(undoButton)
 
         stack.addArrangedSubview(separator())
 
@@ -60,12 +51,26 @@ final class EditorToolbarView: NSView {
         colorWell.widthAnchor.constraint(equalToConstant: 44).isActive = true
         stack.addArrangedSubview(colorWell)
 
+        let weightTitle = NSTextField(labelWithString: "Weight")
+        weightTitle.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(weightTitle)
+        weightStepper.minValue = Double(min(Annotation.minimumLineWidth, Annotation.minimumTextFontSize))
+        weightStepper.maxValue = Double(max(Annotation.maximumLineWidth, Annotation.maximumTextFontSize))
+        weightStepper.increment = 1
+        weightStepper.isEnabled = false
+        weightStepper.target = self
+        weightStepper.action = #selector(changeSelectedWeight(_:))
+        stack.addArrangedSubview(weightStepper)
+        weightLabel.alignment = .right
+        weightLabel.widthAnchor.constraint(equalToConstant: 28).isActive = true
+        stack.addArrangedSubview(weightLabel)
+
         stack.addArrangedSubview(separator())
-        let saveButton = NSButton(title: "💾", target: self, action: #selector(savePNG))
+        let copyButton = iconButton(title: "📋", target: self, action: #selector(copyImage))
+        copyButton.toolTip = "Copy"
+        stack.addArrangedSubview(copyButton)
+        let saveButton = iconButton(title: "💾", target: self, action: #selector(savePNG))
         saveButton.toolTip = "Save As…"
-        saveButton.font = .systemFont(ofSize: 22, weight: .semibold)
-        saveButton.bezelStyle = .rounded
-        saveButton.widthAnchor.constraint(equalToConstant: 48).isActive = true
         stack.addArrangedSubview(saveButton)
 
         NSLayoutConstraint.activate([
@@ -86,19 +91,41 @@ final class EditorToolbarView: NSView {
         canvasView?.applyColorToSelectedAnnotation(sender.color)
     }
 
-    @objc private func undoLastChange() {
-        canvasView?.undoLastChange()
+    @objc private func changeSelectedWeight(_ sender: NSStepper) {
+        canvasView?.applyWeightToSelectedAnnotation(CGFloat(sender.doubleValue))
+    }
+
+    @objc private func copyImage() {
+        canvasView?.copyToClipboard()
     }
 
     @objc private func savePNG() {
         canvasView?.savePNG()
     }
 
-    private func updateColorWell(with color: NSColor?) {
+    private func updateSelectionControls(color: NSColor?, weight: CGFloat?) {
         colorWell.isEnabled = color != nil
         if let color {
             colorWell.color = color
         }
+        weightStepper.isEnabled = weight != nil
+        if let weight {
+            weightStepper.doubleValue = Double(weight)
+            weightLabel.stringValue = String(format: "%.0f", weight)
+        } else {
+            weightLabel.stringValue = "—"
+        }
+    }
+
+    private func iconButton(title: String, target: AnyObject?, action: Selector) -> NSButton {
+        let button = NSButton(title: title, target: target, action: action)
+        button.font = .systemFont(ofSize: 22, weight: .semibold)
+        button.bezelStyle = .rounded
+        button.alignment = .center
+        button.imagePosition = .noImage
+        button.widthAnchor.constraint(equalToConstant: 48).isActive = true
+        button.heightAnchor.constraint(equalToConstant: 44).isActive = true
+        return button
     }
 
     private func updateButtons() {
