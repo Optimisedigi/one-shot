@@ -4,14 +4,15 @@ final class EditorToolbarView: NSView {
     private weak var canvasView: EditorCanvasView?
     private var buttons: [NSButton] = []
     private let colorWell = NSColorWell()
+    private let borderColorWell = NSColorWell()
     private let weightStepper = NSStepper()
     private let weightLabel = NSTextField(labelWithString: "—")
 
     init(canvasView: EditorCanvasView) {
         self.canvasView = canvasView
         super.init(frame: .zero)
-        canvasView.onSelectionChange = { [weak self] color, weight in
-            self?.updateSelectionControls(color: color, weight: weight)
+        canvasView.onSelectionChange = { [weak self] color, borderColor, weight in
+            self?.updateSelectionControls(color: color, borderColor: borderColor, weight: weight)
         }
         setup()
     }
@@ -32,7 +33,7 @@ final class EditorToolbarView: NSView {
         addSubview(stack)
 
         for tool in EditorTool.allCases {
-            let button = iconButton(title: tool.iconTitle, target: self, action: #selector(selectTool(_:)))
+            let button = iconButton(symbolName: tool.symbolName, fallbackTitle: tool.iconTitle, target: self, action: #selector(selectTool(_:)))
             button.toolTip = tool.rawValue
             button.identifier = NSUserInterfaceItemIdentifier(tool.rawValue)
             stack.addArrangedSubview(button)
@@ -51,6 +52,17 @@ final class EditorToolbarView: NSView {
         colorWell.widthAnchor.constraint(equalToConstant: 44).isActive = true
         stack.addArrangedSubview(colorWell)
 
+        let borderColorLabel = NSTextField(labelWithString: "Border")
+        borderColorLabel.textColor = .secondaryLabelColor
+        stack.addArrangedSubview(borderColorLabel)
+        borderColorWell.color = .white
+        borderColorWell.isEnabled = false
+        borderColorWell.toolTip = "Border color (Step badges)"
+        borderColorWell.target = self
+        borderColorWell.action = #selector(changeSelectedBorderColor(_:))
+        borderColorWell.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        stack.addArrangedSubview(borderColorWell)
+
         let weightTitle = NSTextField(labelWithString: "Weight")
         weightTitle.textColor = .secondaryLabelColor
         stack.addArrangedSubview(weightTitle)
@@ -66,10 +78,10 @@ final class EditorToolbarView: NSView {
         stack.addArrangedSubview(weightLabel)
 
         stack.addArrangedSubview(separator())
-        let copyButton = iconButton(title: "📋", target: self, action: #selector(copyImage))
+        let copyButton = iconButton(symbolName: "doc.on.doc", fallbackTitle: "📋", target: self, action: #selector(copyImage))
         copyButton.toolTip = "Copy"
         stack.addArrangedSubview(copyButton)
-        let saveButton = iconButton(title: "💾", target: self, action: #selector(savePNG))
+        let saveButton = iconButton(symbolName: "square.and.arrow.down", fallbackTitle: "💾", target: self, action: #selector(savePNG))
         saveButton.toolTip = "Save As…"
         stack.addArrangedSubview(saveButton)
 
@@ -91,6 +103,10 @@ final class EditorToolbarView: NSView {
         canvasView?.applyColorToSelectedAnnotation(sender.color)
     }
 
+    @objc private func changeSelectedBorderColor(_ sender: NSColorWell) {
+        canvasView?.applyBorderColorToSelectedAnnotation(sender.color)
+    }
+
     @objc private func changeSelectedWeight(_ sender: NSStepper) {
         canvasView?.applyWeightToSelectedAnnotation(CGFloat(sender.doubleValue))
     }
@@ -103,10 +119,14 @@ final class EditorToolbarView: NSView {
         canvasView?.savePNG()
     }
 
-    private func updateSelectionControls(color: NSColor?, weight: CGFloat?) {
+    private func updateSelectionControls(color: NSColor?, borderColor: NSColor?, weight: CGFloat?) {
         colorWell.isEnabled = color != nil
         if let color {
             colorWell.color = color
+        }
+        borderColorWell.isEnabled = borderColor != nil
+        if let borderColor {
+            borderColorWell.color = borderColor
         }
         weightStepper.isEnabled = weight != nil
         if let weight {
@@ -117,12 +137,19 @@ final class EditorToolbarView: NSView {
         }
     }
 
-    private func iconButton(title: String, target: AnyObject?, action: Selector) -> NSButton {
-        let button = NSButton(title: title, target: target, action: action)
-        button.font = .systemFont(ofSize: 22, weight: .semibold)
+    private func iconButton(symbolName: String, fallbackTitle: String, target: AnyObject?, action: Selector) -> NSButton {
+        let button = NSButton(title: fallbackTitle, target: target, action: action)
+        if let image = NSImage(systemSymbolName: symbolName, accessibilityDescription: fallbackTitle) {
+            let config = NSImage.SymbolConfiguration(pointSize: 17, weight: .semibold)
+            button.image = image.withSymbolConfiguration(config)
+            button.imagePosition = .imageOnly
+            button.title = ""
+        } else {
+            button.font = .systemFont(ofSize: 22, weight: .semibold)
+            button.imagePosition = .noImage
+        }
         button.bezelStyle = .rounded
         button.alignment = .center
-        button.imagePosition = .noImage
         button.widthAnchor.constraint(equalToConstant: 48).isActive = true
         button.heightAnchor.constraint(equalToConstant: 44).isActive = true
         return button

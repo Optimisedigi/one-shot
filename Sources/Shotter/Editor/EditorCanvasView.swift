@@ -38,15 +38,24 @@ final class EditorCanvasView: NSView {
     private var activeTextView: MultilineCommittingTextView?
     private var activeTextOrigin: NSPoint?
     private var selectedAnnotationIndex: Int? {
-        didSet { onSelectionChange?(selectedAnnotationColor, selectedAnnotationWeight) }
+        didSet { onSelectionChange?(selectedAnnotationColor, selectedAnnotationBorderColor, selectedAnnotationWeight) }
     }
     private var zoom: CGFloat = 1
+    private var activeNumberField: NSTextField?
+    private var activeNumberFieldIndex: Int?
+    private static let stepNumberHitFraction: CGFloat = 0.55
 
-    var onSelectionChange: ((NSColor?, CGFloat?) -> Void)?
+    var onSelectionChange: ((NSColor?, NSColor?, CGFloat?) -> Void)?
 
     var selectedAnnotationColor: NSColor? {
         guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else { return nil }
         return annotations[selectedAnnotationIndex].color
+    }
+
+    var selectedAnnotationBorderColor: NSColor? {
+        guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else { return nil }
+        let annotation = annotations[selectedAnnotationIndex]
+        return annotation.isStep ? annotation.borderColor : nil
     }
 
     var selectedAnnotationWeight: CGFloat? {
@@ -102,6 +111,7 @@ final class EditorCanvasView: NSView {
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
         commitActiveText()
+        commitActiveNumberEdit(apply: true)
         guard let point = imagePoint(from: event.locationInWindow) else { return }
         if let handleHit = resizeHandleHit(at: point) {
             recordUndoState()
@@ -112,6 +122,14 @@ final class EditorCanvasView: NSView {
         }
         if let annotationIndex = annotationIndex(at: point) {
             let annotation = annotations[annotationIndex]
+            // Pressing the number glyph inside a Step badge is an independent
+            // interaction from selecting/moving the badge's border: it only
+            // opens the number for editing and never starts a drag, so it
+            // can't be mistaken for (or trigger) a border selection.
+            if annotation.isStep, stepNumberHitTest(annotation, at: point) {
+                beginNumberEdit(at: annotationIndex)
+                return
+            }
             if tool == .text, !annotation.isText {
                 selectedAnnotationIndex = nil
                 beginInlineText(at: point)
@@ -145,7 +163,7 @@ final class EditorCanvasView: NSView {
             moveAnnotation(at: index, to: point, offset: offset)
         case .resizing(let index, let handle, let originalBounds):
             resizeAnnotation(at: index, handle: handle, originalBounds: originalBounds, to: point)
-            onSelectionChange?(selectedAnnotationColor, selectedAnnotationWeight)
+            onSelectionChange?(selectedAnnotationColor, selectedAnnotationBorderColor, selectedAnnotationWeight)
         case nil:
             break
         }
@@ -249,7 +267,7 @@ final class EditorCanvasView: NSView {
         guard let window else { return }
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
-        panel.nameFieldStringValue = "Shotter Capture.png"
+        panel.nameFieldStringValue = "SC.png"
         commitActiveText()
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url, let data = self?.renderFinalImage().pngData() else { return }
@@ -327,7 +345,7 @@ final class EditorCanvasView: NSView {
             case .pixelate(let rect):
                 drawCachedPixelate(rect, scale: annotation.lineWidth)
             case .step(let number, let center, let radius):
-                drawStep(number: number, center: center, radius: radius, color: annotation.color)
+                drawStep(number: number, center: center, radius: radius, color: annotation.color, borderColor: annotation.borderColor)
             }
             if index == selectedAnnotationIndex {
                 drawSelectionHighlight(for: annotation)
@@ -347,6 +365,58 @@ final class EditorCanvasView: NSView {
             if case .step = annotation.kind { return true }
             return false
         }.count + 1
+    }
+
+    /// True when `point` lands on the inner number glyph of a Step badge,
+    /// as opposed to the outer ring/border used to select or drag it.
+    private func stepNumberHitTest(_ annotation: Annotation, at point: NSPoint) -> Bool {
+        guard case .step(_, let center, let radius) = annotation.kind else { return false }
+        return distance(point, center) <= radius * Self.stepNumberHitFraction
+    }
+
+    private func beginNumberEdit(at index: Int) {
+        commitActiveText()
+        commitActiveNumberEdit(apply: true)
+        guard annotations.indices.contains(index), case .step(let number, let center, let radius) = annotations[index].kind else { return }
+        selectedAnnotationIndex = nil
+        let viewCenter = viewPoint(fromImagePoint: center)
+        let viewRadius = radius * (imageRect.width / max(baseImage.size.width, 1))
+        let size = max(26, viewRadius * 1.3)
+        let field = NSTextField(frame: NSRect(x: viewCenter.x - size / 2, y: viewCenter.y - size / 2, width: size, height: size))
+        field.stringValue = String(number)
+        field.alignment = .center
+        field.font = .systemFont(ofSize: 14, weight: .bold)
+        field.isBezeled = false
+        field.isBordered = false
+        field.drawsBackground = true
+        field.backgroundColor = .white
+        field.textColor = .black
+        field.wantsLayer = true
+        field.layer?.cornerRadius = size / 2
+        field.layer?.masksToBounds = true
+        field.delegate = self
+        addSubview(field)
+        activeNumberField = field
+        activeNumberFieldIndex = index
+        window?.makeFirstResponder(field)
+        field.currentEditor()?.selectAll(nil)
+    }
+
+    private func commitActiveNumberEdit(apply: Bool) {
+        guard let field = activeNumberField, let index = activeNumberFieldIndex else { return }
+        activeNumberField = nil
+        activeNumberFieldIndex = nil
+        defer {
+            field.removeFromSuperview()
+            if window?.firstResponder === field.currentEditor() { window?.makeFirstResponder(self) }
+            needsDisplay = true
+        }
+        guard apply, annotations.indices.contains(index), case .step(_, let center, let radius) = annotations[index].kind else { return }
+        if let newNumber = Int(field.stringValue.trimmingCharacters(in: .whitespaces)), newNumber > 0 {
+            recordUndoState()
+            annotations[index].kind = .step(number: newNumber, center: center, radius: radius)
+            selectedAnnotationIndex = index
+        }
     }
 
     private func drawCachedPixelate(_ rect: NSRect, scale: CGFloat) {
@@ -405,7 +475,16 @@ final class EditorCanvasView: NSView {
         guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else { return }
         recordUndoState()
         annotations[selectedAnnotationIndex].color = color
-        onSelectionChange?(color, selectedAnnotationWeight)
+        onSelectionChange?(color, selectedAnnotationBorderColor, selectedAnnotationWeight)
+        needsDisplay = true
+    }
+
+    func applyBorderColorToSelectedAnnotation(_ color: NSColor) {
+        guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex),
+              annotations[selectedAnnotationIndex].isStep else { return }
+        recordUndoState()
+        annotations[selectedAnnotationIndex].borderColor = color
+        onSelectionChange?(selectedAnnotationColor, color, selectedAnnotationWeight)
         needsDisplay = true
     }
 
@@ -422,7 +501,7 @@ final class EditorCanvasView: NSView {
         case .step(let number, let center, _):
             annotations[selectedAnnotationIndex].kind = .step(number: number, center: center, radius: clamp(weight, min: Annotation.minimumStepRadius, max: Annotation.maximumStepRadius))
         }
-        onSelectionChange?(selectedAnnotationColor, selectedAnnotationWeight)
+        onSelectionChange?(selectedAnnotationColor, selectedAnnotationBorderColor, selectedAnnotationWeight)
         needsDisplay = true
     }
 
@@ -691,7 +770,7 @@ final class EditorCanvasView: NSView {
         commitActiveText()
         guard let data = renderFinalImage().pngData() else { return }
         let desktopURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first ?? FileManager.default.homeDirectoryForCurrentUser
-        let fileName = "Shotter Capture \(Self.fileTimestamp()).png"
+        let fileName = "SC \(Self.fileTimestamp()).png"
         let url = desktopURL.appendingPathComponent(fileName)
         do {
             try data.write(to: url)
@@ -705,7 +784,7 @@ final class EditorCanvasView: NSView {
 
     private static func fileTimestamp() -> String {
         let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
+        formatter.dateFormat = "dd-MM-yy HH.mm.ss"
         return formatter.string(from: Date())
     }
 
@@ -744,6 +823,26 @@ private func distanceFromPoint(_ point: NSPoint, toLineSegmentStart start: NSPoi
     let t = max(CGFloat(0), min(CGFloat(1), ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared))
     let projection = NSPoint(x: start.x + t * dx, y: start.y + t * dy)
     return distance(point, projection)
+}
+
+extension EditorCanvasView: NSTextFieldDelegate {
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard control === activeNumberField else { return false }
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            commitActiveNumberEdit(apply: true)
+            return true
+        }
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            commitActiveNumberEdit(apply: false)
+            return true
+        }
+        return false
+    }
+
+    func controlTextDidEndEditing(_ obj: Notification) {
+        guard let field = obj.object as? NSTextField, field === activeNumberField else { return }
+        commitActiveNumberEdit(apply: true)
+    }
 }
 
 private extension Annotation {

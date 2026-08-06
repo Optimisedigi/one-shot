@@ -53,12 +53,12 @@ extension EditorCanvasView {
         }
     }
 
-    func drawStep(number: Int, center: NSPoint, radius: CGFloat, color: NSColor) {
+    func drawStep(number: Int, center: NSPoint, radius: CGFloat, color: NSColor, borderColor: NSColor = .white) {
         let circleRect = NSRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
         let circle = NSBezierPath(ovalIn: circleRect)
         color.setFill()
         circle.fill()
-        NSColor.white.setStroke()
+        borderColor.setStroke()
         circle.lineWidth = max(2, radius * 0.14)
         circle.stroke()
 

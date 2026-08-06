@@ -25,5 +25,13 @@ struct Annotation {
 
     var kind: Kind
     var color: NSColor = .systemRed
+    /// Border/outline color. Currently used for the ring around Step badges,
+    /// independent from the badge's fill `color`.
+    var borderColor: NSColor = .white
     var lineWidth: CGFloat = Annotation.defaultArrowLineWidth
+
+    var isStep: Bool {
+        if case .step = kind { return true }
+        return false
+    }
 }

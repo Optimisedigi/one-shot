@@ -16,7 +16,7 @@ enum ImageRenderer {
             case .pixelate(let rect):
                 drawPixelate(rect, scale: annotation.lineWidth, from: baseImage)
             case .step(let number, let center, let radius):
-                drawStep(number: number, center: center, radius: radius, color: annotation.color)
+                drawStep(number: number, center: center, radius: radius, color: annotation.color, borderColor: annotation.borderColor)
             }
         }
         image.unlockFocus()
@@ -83,12 +83,12 @@ enum ImageRenderer {
         }
     }
 
-    private static func drawStep(number: Int, center: NSPoint, radius: CGFloat, color: NSColor) {
+    private static func drawStep(number: Int, center: NSPoint, radius: CGFloat, color: NSColor, borderColor: NSColor) {
         let circleRect = NSRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
         let circle = NSBezierPath(ovalIn: circleRect)
         color.setFill()
         circle.fill()
-        NSColor.white.setStroke()
+        borderColor.setStroke()
         circle.lineWidth = max(2, radius * 0.14)
         circle.stroke()
 
