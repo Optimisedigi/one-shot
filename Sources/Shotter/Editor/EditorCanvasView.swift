@@ -43,7 +43,6 @@ final class EditorCanvasView: NSView {
     private var zoom: CGFloat = 1
     private var activeNumberField: NSTextField?
     private var activeNumberFieldIndex: Int?
-    private static let stepNumberHitFraction: CGFloat = 0.55
 
     var onSelectionChange: ((NSColor?, NSColor?, CGFloat?) -> Void)?
 
@@ -367,11 +366,16 @@ final class EditorCanvasView: NSView {
         }.count + 1
     }
 
-    /// True when `point` lands on the inner number glyph of a Step badge,
-    /// as opposed to the outer ring/border used to select or drag it.
+    /// True when `point` lands inside the filled number area of a Step
+    /// badge, as opposed to the thin outer ring used to select or drag it.
+    /// This intentionally covers almost the entire badge (everything inside
+    /// the visible ring stroke) so pressing the number is easy and never
+    /// mistaken for a border selection.
     private func stepNumberHitTest(_ annotation: Annotation, at point: NSPoint) -> Bool {
         guard case .step(_, let center, let radius) = annotation.kind else { return false }
-        return distance(point, center) <= radius * Self.stepNumberHitFraction
+        let ringWidth = Annotation.stepRingWidth(for: radius)
+        let numberRadius = max(radius * 0.4, radius - ringWidth)
+        return distance(point, center) <= numberRadius
     }
 
     private func beginNumberEdit(at index: Int) {

@@ -34,4 +34,11 @@ struct Annotation {
         if case .step = kind { return true }
         return false
     }
+
+    /// Thickness of the ring drawn around a Step badge, shared by drawing
+    /// code and hit-testing so the pressable number area always matches
+    /// what's visually inside the ring.
+    static func stepRingWidth(for radius: CGFloat) -> CGFloat {
+        max(2, radius * 0.14)
+    }
 }

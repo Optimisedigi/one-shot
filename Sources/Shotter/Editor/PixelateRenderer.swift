@@ -22,8 +22,14 @@ enum PixelateRenderer {
 
         let ciImage = CIImage(cgImage: croppedCGImage)
         let extent = ciImage.extent
+        // `scale` is expressed in on-screen points; convert it to the base
+        // image's actual pixel density so the mosaic blocks stay visibly
+        // chunky (a real TV/police-style pixelation) instead of shrinking to
+        // near-invisible squares on Retina screenshots.
+        let devicePixelScale = max(scaleX, scaleY, 1)
+        let blockSize = max(scale, Annotation.minimumPixelBlockScale) * devicePixelScale
         filter.setValue(ciImage, forKey: kCIInputImageKey)
-        filter.setValue(max(scale, Annotation.minimumPixelBlockScale), forKey: kCIInputScaleKey)
+        filter.setValue(blockSize, forKey: kCIInputScaleKey)
         filter.setValue(CIVector(x: extent.midX, y: extent.midY), forKey: kCIInputCenterKey)
 
         guard let outputImage = filter.outputImage?.cropped(to: extent),

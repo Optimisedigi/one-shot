@@ -59,7 +59,7 @@ extension EditorCanvasView {
         color.setFill()
         circle.fill()
         borderColor.setStroke()
-        circle.lineWidth = max(2, radius * 0.14)
+        circle.lineWidth = Annotation.stepRingWidth(for: radius)
         circle.stroke()
 
         let fontSize = max(10, radius * 1.05)
