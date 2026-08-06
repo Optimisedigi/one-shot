@@ -46,21 +46,23 @@ final class EditorToolbarView: NSView {
         colorLabel.textColor = .secondaryLabelColor
         stack.addArrangedSubview(colorLabel)
         colorWell.color = .systemRed
+        colorWell.colorWellStyle = .minimal
         colorWell.isEnabled = false
         colorWell.target = self
         colorWell.action = #selector(changeSelectedColor(_:))
-        colorWell.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        colorWell.widthAnchor.constraint(equalToConstant: 32).isActive = true
         stack.addArrangedSubview(colorWell)
 
         let borderColorLabel = NSTextField(labelWithString: "Border")
         borderColorLabel.textColor = .secondaryLabelColor
         stack.addArrangedSubview(borderColorLabel)
         borderColorWell.color = .white
+        borderColorWell.colorWellStyle = .minimal
         borderColorWell.isEnabled = false
         borderColorWell.toolTip = "Border color (Step badges)"
         borderColorWell.target = self
         borderColorWell.action = #selector(changeSelectedBorderColor(_:))
-        borderColorWell.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        borderColorWell.widthAnchor.constraint(equalToConstant: 32).isActive = true
         stack.addArrangedSubview(borderColorWell)
 
         let weightTitle = NSTextField(labelWithString: "Weight")
