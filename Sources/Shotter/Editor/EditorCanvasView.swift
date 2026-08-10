@@ -111,6 +111,7 @@ final class EditorCanvasView: NSView {
         window?.makeFirstResponder(self)
         commitActiveText()
         commitActiveNumberEdit(apply: true)
+        let clickCount = event.clickCount
         guard let point = imagePoint(from: event.locationInWindow) else { return }
         if let handleHit = resizeHandleHit(at: point) {
             recordUndoState()
@@ -121,11 +122,9 @@ final class EditorCanvasView: NSView {
         }
         if let annotationIndex = annotationIndex(at: point) {
             let annotation = annotations[annotationIndex]
-            // Pressing the number glyph inside a Step badge is an independent
-            // interaction from selecting/moving the badge's border: it only
-            // opens the number for editing and never starts a drag, so it
-            // can't be mistaken for (or trigger) a border selection.
-            if annotation.isStep, stepNumberHitTest(annotation, at: point) {
+            // Double-clicking inside a Step badge opens it for number editing.
+            // Single-click selects and allows drag/resize like any annotation.
+            if annotation.isStep, clickCount >= 2, stepNumberHitTest(annotation, at: point) {
                 beginNumberEdit(at: annotationIndex)
                 return
             }
@@ -146,7 +145,8 @@ final class EditorCanvasView: NSView {
             return
         }
         if tool == .step {
-            placeStep(at: point)
+            dragMode = .drawing(start: point, current: point)
+            needsDisplay = true
             return
         }
         dragMode = .drawing(start: point, current: point)
@@ -192,6 +192,17 @@ final class EditorCanvasView: NSView {
             case .pixelate where rect.width > 2 && rect.height > 2:
                 recordUndoState()
                 annotations.append(Annotation(kind: .pixelate(rect), lineWidth: Annotation.defaultPixelBlockScale))
+                selectedAnnotationIndex = annotations.indices.last
+            case .step:
+                let dragDistance = distance(start, end)
+                let radius: CGFloat
+                if dragDistance > 2 {
+                    radius = clamp(dragDistance, min: Annotation.minimumStepRadius, max: Annotation.maximumStepRadius)
+                } else {
+                    radius = Annotation.defaultStepRadius
+                }
+                recordUndoState()
+                annotations.append(Annotation(kind: .step(number: nextStepNumber(), center: start, radius: radius)))
                 selectedAnnotationIndex = annotations.indices.last
             default:
                 return
@@ -328,7 +339,13 @@ final class EditorCanvasView: NSView {
             rect.fill()
             drawRectangle(rect, color: .systemRed, lineWidth: Annotation.defaultRectangleLineWidth)
         case .step:
-            break
+            let dragDistance = distance(start, current)
+            if dragDistance > 2 {
+                let radius = clamp(dragDistance, min: Annotation.minimumStepRadius, max: Annotation.maximumStepRadius)
+                drawStep(number: nextStepNumber(), center: start, radius: radius, color: .systemRed, borderColor: .white)
+            } else {
+                drawStep(number: nextStepNumber(), center: start, radius: Annotation.defaultStepRadius, color: .systemRed.withAlphaComponent(0.5), borderColor: .white)
+            }
         }
     }
 
@@ -352,13 +369,6 @@ final class EditorCanvasView: NSView {
         }
     }
 
-    private func placeStep(at imagePoint: NSPoint) {
-        recordUndoState()
-        annotations.append(Annotation(kind: .step(number: nextStepNumber(), center: imagePoint, radius: Annotation.defaultStepRadius)))
-        selectedAnnotationIndex = annotations.indices.last
-        needsDisplay = true
-    }
-
     private func nextStepNumber() -> Int {
         annotations.filter { annotation in
             if case .step = annotation.kind { return true }
@@ -367,10 +377,8 @@ final class EditorCanvasView: NSView {
     }
 
     /// True when `point` lands inside the filled number area of a Step
-    /// badge, as opposed to the thin outer ring used to select or drag it.
-    /// This intentionally covers almost the entire badge (everything inside
-    /// the visible ring stroke) so pressing the number is easy and never
-    /// mistaken for a border selection.
+    /// badge. Used to decide whether a double-click opens the number editor
+    /// (vs. selecting/moving the badge as a whole).
     private func stepNumberHitTest(_ annotation: Annotation, at point: NSPoint) -> Bool {
         guard case .step(_, let center, let radius) = annotation.kind else { return false }
         let ringWidth = Annotation.stepRingWidth(for: radius)
