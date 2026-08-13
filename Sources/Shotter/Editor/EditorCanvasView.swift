@@ -128,9 +128,19 @@ final class EditorCanvasView: NSView {
                 beginNumberEdit(at: annotationIndex)
                 return
             }
-            if tool == .text, !annotation.isText {
+            // The active tool wins over selection when it draws a different
+            // kind than the one under the cursor: clicking inside an existing
+            // box with Step/Pixelate/Text must add a new annotation, not grab
+            // the box. Same-kind clicks still select, so boxes stay draggable
+            // with the Rectangle tool.
+            if !tool.creates(annotation) {
                 selectedAnnotationIndex = nil
-                beginInlineText(at: point)
+                if tool == .text {
+                    beginInlineText(at: point)
+                } else {
+                    dragMode = .drawing(start: point, current: point)
+                    needsDisplay = true
+                }
                 return
             }
             selectedAnnotationIndex = annotationIndex
@@ -857,11 +867,25 @@ extension EditorCanvasView: NSTextFieldDelegate {
     }
 }
 
-private extension Annotation {
-    var isText: Bool {
-        if case .text = kind { return true }
-        return false
+private extension EditorTool {
+    /// True when this tool draws the same kind of annotation as `annotation`,
+    /// i.e. a click on it means "select/move that one" rather than "draw a new
+    /// one on top".
+    func creates(_ annotation: Annotation) -> Bool {
+        switch (self, annotation.kind) {
+        case (.rectangle, .rectangle),
+             (.arrow, .arrow),
+             (.text, .text),
+             (.pixelate, .pixelate),
+             (.step, .step):
+            return true
+        default:
+            return false
+        }
     }
+}
+
+private extension Annotation {
 
     var isResizable: Bool {
         switch kind {
