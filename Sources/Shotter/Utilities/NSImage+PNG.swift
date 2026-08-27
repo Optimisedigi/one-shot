@@ -1,24 +1,11 @@
 import AppKit
 import UniformTypeIdentifiers
 
-extension NSPasteboard.PasteboardType {
-    static let png = NSPasteboard.PasteboardType("public.png")
-}
-
 extension NSImage {
     func pngData() -> Data? {
         guard let tiffRepresentation,
               let bitmap = NSBitmapImageRep(data: tiffRepresentation) else { return nil }
         return bitmap.representation(using: .png, properties: [:])
-    }
-
-    func copyToPasteboard() {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.writeObjects([self])
-        if let pngData = pngData() {
-            pasteboard.setData(pngData, forType: .png)
-        }
     }
 
     func cropped(to rect: NSRect) -> NSImage? {

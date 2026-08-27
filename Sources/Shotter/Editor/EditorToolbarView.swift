@@ -59,7 +59,7 @@ final class EditorToolbarView: NSView {
         borderColorWell.color = .white
         borderColorWell.colorWellStyle = .minimal
         borderColorWell.isEnabled = false
-        borderColorWell.toolTip = "Border color (Step badges)"
+        borderColorWell.toolTip = "Border color (Step ring, Text card)"
         borderColorWell.target = self
         borderColorWell.action = #selector(changeSelectedBorderColor(_:))
         borderColorWell.widthAnchor.constraint(equalToConstant: 32).isActive = true
@@ -81,7 +81,7 @@ final class EditorToolbarView: NSView {
 
         stack.addArrangedSubview(separator())
         let copyButton = iconButton(symbolName: "doc.on.doc", fallbackTitle: "📋", target: self, action: #selector(copyImage))
-        copyButton.toolTip = "Copy"
+        copyButton.toolTip = "Save to Desktop & copy file path"
         stack.addArrangedSubview(copyButton)
         let saveButton = iconButton(symbolName: "square.and.arrow.down", fallbackTitle: "💾", target: self, action: #selector(savePNG))
         saveButton.toolTip = "Save As…"

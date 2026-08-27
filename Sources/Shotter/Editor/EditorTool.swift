@@ -3,6 +3,7 @@ import Foundation
 enum EditorTool: String, CaseIterable {
     case rectangle = "Rectangle"
     case arrow = "Arrow"
+    case curve = "Curve"
     case text = "Text"
     case pixelate = "Pixelate"
     case step = "Step"
@@ -12,6 +13,7 @@ enum EditorTool: String, CaseIterable {
         switch self {
         case .rectangle: return "rectangle"
         case .arrow: return "arrow.up.right"
+        case .curve: return "arrow.turn.up.right"
         case .text: return "textformat"
         case .pixelate: return "mosaic"
         case .step: return "number.circle.fill"
@@ -23,6 +25,7 @@ enum EditorTool: String, CaseIterable {
         switch self {
         case .rectangle: return "▭"
         case .arrow: return "↗"
+        case .curve: return "↷"
         case .text: return "T"
         case .pixelate: return "🔳"
         case .step: return "①"

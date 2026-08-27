@@ -17,7 +17,8 @@ struct Annotation {
 
     enum Kind {
         case rectangle(NSRect)
-        case arrow(start: NSPoint, end: NSPoint)
+        /// `bend` is how far the arc bows sideways; 0 is a straight arrow.
+        case arrow(start: NSPoint, end: NSPoint, bend: CGFloat)
         case text(String, origin: NSPoint, fontSize: CGFloat)
         case pixelate(NSRect)
         case step(number: Int, center: NSPoint, radius: CGFloat)
@@ -25,14 +26,22 @@ struct Annotation {
 
     var kind: Kind
     var color: NSColor = .systemRed
-    /// Border/outline color. Currently used for the ring around Step badges,
-    /// independent from the badge's fill `color`.
+    /// Secondary color, independent from `color`: the ring around a Step
+    /// badge, and the card behind a Text annotation.
     var borderColor: NSColor = .white
     var lineWidth: CGFloat = Annotation.defaultArrowLineWidth
 
     var isStep: Bool {
         if case .step = kind { return true }
         return false
+    }
+
+    /// Kinds that draw a second color the user can change.
+    var hasBorderColor: Bool {
+        switch kind {
+        case .step, .text: return true
+        case .rectangle, .arrow, .pixelate: return false
+        }
     }
 
     /// Thickness of the ring drawn around a Step badge, shared by drawing

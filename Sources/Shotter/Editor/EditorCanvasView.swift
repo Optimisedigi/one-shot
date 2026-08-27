@@ -34,9 +34,18 @@ final class EditorCanvasView: NSView {
     }
 
     private var dragMode: DragMode?
+    /// Points the cursor travelled while drawing, so the Curve tool can turn
+    /// the shape of the drag into the arc of the arrow.
+    private var dragPath: [NSPoint] = []
     private var pixelateCache: [PixelateCacheKey: NSImage] = [:]
     private var activeTextView: MultilineCommittingTextView?
     private var activeTextOrigin: NSPoint?
+    private var activeTextToolbar: InlineTextToolbar?
+    // Last text styling the user picked, reused by the next text annotation
+    // and by later screenshots in this session.
+    private static var textFontSize: CGFloat = Annotation.defaultTextFontSize
+    private static var textColor: NSColor = TextAnnotationStyle.defaultColor
+    private static var textBackground: NSColor = TextAnnotationStyle.defaultBackgroundColor
     private var selectedAnnotationIndex: Int? {
         didSet { onSelectionChange?(selectedAnnotationColor, selectedAnnotationBorderColor, selectedAnnotationWeight) }
     }
@@ -54,7 +63,7 @@ final class EditorCanvasView: NSView {
     var selectedAnnotationBorderColor: NSColor? {
         guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else { return nil }
         let annotation = annotations[selectedAnnotationIndex]
-        return annotation.isStep ? annotation.borderColor : nil
+        return annotation.hasBorderColor ? annotation.borderColor : nil
     }
 
     var selectedAnnotationWeight: CGFloat? {
@@ -168,6 +177,8 @@ final class EditorCanvasView: NSView {
         switch dragMode {
         case .drawing(let start, _):
             dragMode = .drawing(start: start, current: point)
+            if dragPath.isEmpty { dragPath.append(start) }
+            dragPath.append(point)
         case .moving(let index, let offset):
             moveAnnotation(at: index, to: point, offset: offset)
         case .resizing(let index, let handle, let originalBounds):
@@ -183,6 +194,7 @@ final class EditorCanvasView: NSView {
         guard let dragMode else { return }
         defer {
             self.dragMode = nil
+            dragPath = []
             needsDisplay = true
         }
 
@@ -197,7 +209,11 @@ final class EditorCanvasView: NSView {
                 selectedAnnotationIndex = annotations.indices.last
             case .arrow where distance(start, end) > 2:
                 recordUndoState()
-                annotations.append(Annotation(kind: .arrow(start: start, end: end), lineWidth: Annotation.defaultArrowLineWidth))
+                annotations.append(Annotation(kind: .arrow(start: start, end: end, bend: 0), lineWidth: Annotation.defaultArrowLineWidth))
+                selectedAnnotationIndex = annotations.indices.last
+            case .curve where distance(start, end) > 2:
+                recordUndoState()
+                annotations.append(Annotation(kind: .arrow(start: start, end: end, bend: currentDragBend()), lineWidth: Annotation.defaultArrowLineWidth))
                 selectedAnnotationIndex = annotations.indices.last
             case .pixelate where rect.width > 2 && rect.height > 2:
                 recordUndoState()
@@ -278,9 +294,15 @@ final class EditorCanvasView: NSView {
         undoStack.append(annotations)
     }
 
+    /// Saves like Cmd-S, then puts the saved *file* on the pasteboard rather
+    /// than raw image data, so pasting into a terminal yields its path.
     func copyToClipboard() {
         commitActiveText()
-        renderFinalImage().copyToPasteboard()
+        guard let url = savePNGToDesktop() else { return }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([url as NSURL])
+        window?.close()
     }
 
     func savePNG() {
@@ -334,13 +356,20 @@ final class EditorCanvasView: NSView {
         )
     }
 
+    /// How far the in-progress drag bowed away from a straight line.
+    private func currentDragBend() -> CGFloat {
+        ArrowShape.bend(fromDragPath: dragPath)
+    }
+
     private func drawPreview() {
         guard case .drawing(let start, let current) = dragMode else { return }
         switch tool {
         case .rectangle:
             drawRectangle(Geometry.normalizedRect(from: start, to: current), color: .systemRed, lineWidth: Annotation.defaultRectangleLineWidth)
         case .arrow:
-            drawArrow(start: start, end: current, color: .systemRed, lineWidth: Annotation.defaultArrowLineWidth)
+            drawArrow(start: start, end: current, bend: 0, color: .systemRed, lineWidth: Annotation.defaultArrowLineWidth)
+        case .curve:
+            drawArrow(start: start, end: current, bend: currentDragBend(), color: .systemRed, lineWidth: Annotation.defaultArrowLineWidth)
         case .text:
             break
         case .pixelate:
@@ -364,10 +393,10 @@ final class EditorCanvasView: NSView {
             switch annotation.kind {
             case .rectangle(let rect):
                 drawRectangle(rect, color: annotation.color, lineWidth: annotation.lineWidth)
-            case .arrow(let start, let end):
-                drawArrow(start: start, end: end, color: annotation.color, lineWidth: annotation.lineWidth)
+            case .arrow(let start, let end, let bend):
+                drawArrow(start: start, end: end, bend: bend, color: annotation.color, lineWidth: annotation.lineWidth)
             case .text(let text, let origin, let fontSize):
-                drawText(text, at: origin, color: annotation.color, fontSize: fontSize)
+                drawText(text, at: origin, color: annotation.color, backgroundColor: annotation.borderColor, fontSize: fontSize)
             case .pixelate(let rect):
                 drawCachedPixelate(rect, scale: annotation.lineWidth)
             case .step(let number, let center, let radius):
@@ -458,24 +487,89 @@ final class EditorCanvasView: NSView {
 
     private func beginInlineText(at imagePoint: NSPoint) {
         commitActiveText()
+        // Size and colors stay where the last text left them.
         let fieldOrigin = viewPoint(fromImagePoint: imagePoint)
-        let textView = MultilineCommittingTextView(frame: NSRect(x: fieldOrigin.x, y: fieldOrigin.y - 4, width: 280, height: 112))
+        let textView = MultilineCommittingTextView(frame: NSRect(x: fieldOrigin.x, y: fieldOrigin.y, width: 120, height: 40))
         textView.onEscape = { [weak self] in self?.commitActiveText() }
-        textView.drawsBackground = false
         textView.isRichText = false
         textView.allowsUndo = true
-        textView.isHorizontallyResizable = false
+        textView.isHorizontallyResizable = true
         textView.isVerticallyResizable = true
-        textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.containerSize = NSSize(width: textView.bounds.width, height: CGFloat.greatestFiniteMagnitude)
-        textView.textContainerInset = .zero
-        textView.textColor = .systemRed
-        textView.insertionPointColor = .systemRed
-        textView.font = .systemFont(ofSize: Annotation.defaultTextFontSize, weight: .bold)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = false
+        textView.textContainer?.containerSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        // Default 5pt padding would offset the text from the card inset we
+        // measure with, clipping the right edge.
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.drawsBackground = true
+        textView.wantsLayer = true
+        textView.layer?.masksToBounds = true
+        textView.delegate = self
         addSubview(textView)
         activeTextView = textView
         activeTextOrigin = imagePoint
+
+        let toolbar = InlineTextToolbar(fontSize: Self.textFontSize, color: Self.textColor, backgroundColor: Self.textBackground)
+        toolbar.onFontSize = { [weak self] size in
+            Self.textFontSize = size
+            self?.applyInlineTextStyle()
+        }
+        toolbar.onColor = { [weak self] color in
+            Self.textColor = color
+            self?.applyInlineTextStyle()
+        }
+        toolbar.onBackgroundColor = { [weak self] color in
+            Self.textBackground = color
+            self?.applyInlineTextStyle()
+        }
+        addSubview(toolbar)
+        activeTextToolbar = toolbar
+
+        applyInlineTextStyle()
         window?.makeFirstResponder(textView)
+    }
+
+    /// Keeps the inline editor looking exactly like the committed annotation:
+    /// padded rounded card, in the current font size, text and card color.
+    private func applyInlineTextStyle() {
+        guard let textView = activeTextView else { return }
+        let viewFontSize = Self.textFontSize * (imageRect.width / max(baseImage.size.width, 1))
+        let pad = TextAnnotationStyle.padding(for: viewFontSize)
+        textView.font = TextAnnotationStyle.font(ofSize: viewFontSize)
+        textView.backgroundColor = Self.textBackground
+        textView.textColor = Self.textColor
+        textView.insertionPointColor = Self.textColor
+        textView.typingAttributes = TextAnnotationStyle.attributes(color: Self.textColor, fontSize: viewFontSize)
+        textView.textContainerInset = pad
+        textView.layer?.cornerRadius = TextAnnotationStyle.cornerRadius(for: viewFontSize)
+        textView.minSize = NSSize(width: pad.width * 2, height: pad.height * 2)
+        sizeInlineTextToFit()
+    }
+
+    private func sizeInlineTextToFit() {
+        guard let textView = activeTextView, let origin = activeTextOrigin else { return }
+        let viewFontSize = Self.textFontSize * (imageRect.width / max(baseImage.size.width, 1))
+        let pad = TextAnnotationStyle.padding(for: viewFontSize)
+        let size = TextAnnotationStyle.textSize(textView.string.isEmpty ? " " : textView.string, fontSize: viewFontSize)
+        let fieldOrigin = viewPoint(fromImagePoint: origin)
+        textView.frame = NSRect(
+            x: fieldOrigin.x - pad.width,
+            y: fieldOrigin.y - pad.height,
+            width: size.width + pad.width * 2,
+            height: size.height + pad.height * 2
+        )
+        positionTextToolbar()
+    }
+
+    private func positionTextToolbar() {
+        guard let toolbar = activeTextToolbar, let textView = activeTextView else { return }
+        let size = toolbar.fittingSize
+        let x = min(max(4, textView.frame.minX), max(4, bounds.width - size.width - 4))
+        var y = textView.frame.maxY + 8
+        if y + size.height > bounds.maxY {
+            y = max(4, textView.frame.minY - size.height - 8)
+        }
+        toolbar.frame = NSRect(x: x, y: y, width: size.width, height: size.height)
     }
 
     private func commitActiveText() {
@@ -483,10 +577,12 @@ final class EditorCanvasView: NSView {
         let text = textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
         if !text.isEmpty, let origin = activeTextOrigin {
             recordUndoState()
-            annotations.append(Annotation(kind: .text(text, origin: origin, fontSize: Annotation.defaultTextFontSize)))
+            annotations.append(Annotation(kind: .text(text, origin: origin, fontSize: Self.textFontSize), color: Self.textColor, borderColor: Self.textBackground))
             selectedAnnotationIndex = annotations.indices.last
         }
         textView.removeFromSuperview()
+        activeTextToolbar?.removeFromSuperview()
+        activeTextToolbar = nil
         activeTextView = nil
         activeTextOrigin = nil
         window?.makeFirstResponder(self)
@@ -503,7 +599,7 @@ final class EditorCanvasView: NSView {
 
     func applyBorderColorToSelectedAnnotation(_ color: NSColor) {
         guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex),
-              annotations[selectedAnnotationIndex].isStep else { return }
+              annotations[selectedAnnotationIndex].hasBorderColor else { return }
         recordUndoState()
         annotations[selectedAnnotationIndex].borderColor = color
         onSelectionChange?(selectedAnnotationColor, color, selectedAnnotationWeight)
@@ -546,8 +642,8 @@ final class EditorCanvasView: NSView {
         switch annotation.kind {
         case .rectangle(let rect), .pixelate(let rect):
             return rect
-        case .arrow(let start, let end):
-            return Geometry.normalizedRect(from: start, to: end)
+        case .arrow(let start, let end, let bend):
+            return ArrowShape.bounds(start: start, end: end, bend: bend)
         case .text(let text, let origin, let fontSize):
             return textBounds(for: text, at: origin, fontSize: fontSize)
         case .step(_, let center, let radius):
@@ -559,8 +655,9 @@ final class EditorCanvasView: NSView {
         switch annotation.kind {
         case .rectangle(let rect), .pixelate(let rect):
             return rect.insetBy(dx: -8, dy: -8).contains(point)
-        case .arrow(let start, let end):
-            return distanceFromPoint(point, toLineSegmentStart: start, end: end) <= 10
+        case .arrow(let start, let end, let bend):
+            let samples = ArrowShape.sampledPoints(start: start, end: end, bend: bend)
+            return zip(samples, samples.dropFirst()).contains { distanceFromPoint(point, toLineSegmentStart: $0, end: $1) <= 10 }
         case .text(let text, let origin, let fontSize):
             return textBounds(for: text, at: origin, fontSize: fontSize).contains(point)
         case .step(_, let center, let radius):
@@ -577,9 +674,9 @@ final class EditorCanvasView: NSView {
             annotations[index].kind = .rectangle(NSRect(origin: origin, size: rect.size))
         case .pixelate(let rect):
             annotations[index].kind = .pixelate(NSRect(origin: origin, size: rect.size))
-        case .arrow(let start, let end):
+        case .arrow(let start, let end, let bend):
             let delta = NSPoint(x: origin.x - start.x, y: origin.y - start.y)
-            annotations[index].kind = .arrow(start: origin, end: NSPoint(x: end.x + delta.x, y: end.y + delta.y))
+            annotations[index].kind = .arrow(start: origin, end: NSPoint(x: end.x + delta.x, y: end.y + delta.y), bend: bend)
         case .text(let text, _, let fontSize):
             annotations[index].kind = .text(text, origin: origin, fontSize: fontSize)
         case .step(let number, _, let radius):
@@ -596,7 +693,7 @@ final class EditorCanvasView: NSView {
         switch annotation.kind {
         case .rectangle(let rect), .pixelate(let rect):
             return rect.origin
-        case .arrow(let start, _):
+        case .arrow(let start, _, _):
             return start
         case .text(_, let origin, _):
             return origin
@@ -606,8 +703,7 @@ final class EditorCanvasView: NSView {
     }
 
     private func textBounds(for text: String, at origin: NSPoint, fontSize: CGFloat) -> NSRect {
-        let size = Self.textSize(text, fontSize: fontSize)
-        return NSRect(x: origin.x, y: origin.y, width: size.width, height: size.height).insetBy(dx: -8, dy: -8)
+        TextAnnotationStyle.boxRect(for: text, at: origin, fontSize: fontSize)
     }
 
     private func stepBounds(center: NSPoint, radius: CGFloat) -> NSRect {
@@ -657,7 +753,7 @@ final class EditorCanvasView: NSView {
         case .text(let text, _, let fontSize):
             let newFontSize = clamp(fontSize * scale, min: Annotation.minimumTextFontSize, max: Annotation.maximumTextFontSize)
             let newBounds = textBounds(for: text, at: originalBounds.origin, fontSize: newFontSize)
-            let newOrigin = textOriginForResize(handle: handle, originalBounds: originalBounds, newBounds: newBounds)
+            let newOrigin = textOriginForResize(handle: handle, originalBounds: originalBounds, newBounds: newBounds, fontSize: newFontSize)
             annotations[index].kind = .text(text, origin: newOrigin, fontSize: newFontSize)
         case .step(let number, _, let radius):
             let newRadius = clamp(radius * scale, min: Annotation.minimumStepRadius, max: Annotation.maximumStepRadius)
@@ -698,16 +794,17 @@ final class EditorCanvasView: NSView {
         }
     }
 
-    private func textOriginForResize(handle: ResizeHandle, originalBounds: NSRect, newBounds: NSRect) -> NSPoint {
+    private func textOriginForResize(handle: ResizeHandle, originalBounds: NSRect, newBounds: NSRect, fontSize: CGFloat) -> NSPoint {
+        let pad = TextAnnotationStyle.padding(for: fontSize)
         switch handle {
         case .bottomLeft:
-            return NSPoint(x: originalBounds.maxX - newBounds.width + 8, y: originalBounds.maxY - newBounds.height + 8)
+            return NSPoint(x: originalBounds.maxX - newBounds.width + pad.width, y: originalBounds.maxY - newBounds.height + pad.height)
         case .bottomRight:
-            return NSPoint(x: originalBounds.minX + 8, y: originalBounds.maxY - newBounds.height + 8)
+            return NSPoint(x: originalBounds.minX + pad.width, y: originalBounds.maxY - newBounds.height + pad.height)
         case .topLeft:
-            return NSPoint(x: originalBounds.maxX - newBounds.width + 8, y: originalBounds.minY + 8)
+            return NSPoint(x: originalBounds.maxX - newBounds.width + pad.width, y: originalBounds.minY + pad.height)
         case .topRight:
-            return NSPoint(x: originalBounds.minX + 8, y: originalBounds.minY + 8)
+            return NSPoint(x: originalBounds.minX + pad.width, y: originalBounds.minY + pad.height)
         }
     }
 
@@ -733,10 +830,11 @@ final class EditorCanvasView: NSView {
         case .pixelate(let rect):
             drawDashedRect(rect.insetBy(dx: -6, dy: -6))
             drawResizeHandles(for: rect)
-        case .arrow(let start, let end):
+        case .arrow(let start, let end, let bend):
             let path = NSBezierPath()
-            path.move(to: start)
-            path.line(to: end)
+            for point in ArrowShape.sampledPoints(start: start, end: end, bend: bend) {
+                path.isEmpty ? path.move(to: point) : path.line(to: point)
+            }
             path.lineWidth = 2
             path.setLineDash([6, 4], count: 2, phase: 0)
             path.stroke()
@@ -773,24 +871,19 @@ final class EditorCanvasView: NSView {
     }
 
     class func textAttributes(color: NSColor, fontSize: CGFloat) -> [NSAttributedString.Key: Any] {
-        [
-            .font: NSFont.systemFont(ofSize: fontSize, weight: .bold),
-            .foregroundColor: color
-        ]
+        TextAnnotationStyle.attributes(color: color, fontSize: fontSize)
     }
 
     class func textSize(_ text: String, fontSize: CGFloat) -> NSSize {
-        let bounds = text.boundingRect(
-            with: NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: textAttributes(color: .systemRed, fontSize: fontSize)
-        )
-        return NSSize(width: ceil(bounds.width), height: ceil(bounds.height))
+        TextAnnotationStyle.textSize(text, fontSize: fontSize)
     }
 
-    func savePNGToDesktop(closeAfterSave: Bool = false) {
+    /// Saves to the Desktop and returns where it landed, so callers can also
+    /// put the file on the pasteboard.
+    @discardableResult
+    func savePNGToDesktop(closeAfterSave: Bool = false) -> URL? {
         commitActiveText()
-        guard let data = renderFinalImage().pngData() else { return }
+        guard let data = renderFinalImage().pngData() else { return nil }
         let desktopURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first ?? FileManager.default.homeDirectoryForCurrentUser
         let fileName = "SC \(Self.fileTimestamp()).png"
         let url = desktopURL.appendingPathComponent(fileName)
@@ -799,8 +892,10 @@ final class EditorCanvasView: NSView {
             if closeAfterSave {
                 window?.close()
             }
+            return url
         } catch {
             NSAlert.show(message: "Save failed", informativeText: error.localizedDescription)
+            return nil
         }
     }
 
@@ -847,6 +942,13 @@ private func distanceFromPoint(_ point: NSPoint, toLineSegmentStart start: NSPoi
     return distance(point, projection)
 }
 
+extension EditorCanvasView: NSTextViewDelegate {
+    func textDidChange(_ notification: Notification) {
+        guard let textView = notification.object as? NSTextView, textView === activeTextView else { return }
+        sizeInlineTextToFit()
+    }
+}
+
 extension EditorCanvasView: NSTextFieldDelegate {
     func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
         guard control === activeNumberField else { return false }
@@ -875,6 +977,7 @@ private extension EditorTool {
         switch (self, annotation.kind) {
         case (.rectangle, .rectangle),
              (.arrow, .arrow),
+             (.curve, .arrow),
              (.text, .text),
              (.pixelate, .pixelate),
              (.step, .step):

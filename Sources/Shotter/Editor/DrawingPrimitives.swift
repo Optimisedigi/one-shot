@@ -8,40 +8,12 @@ extension EditorCanvasView {
         path.stroke()
     }
 
-    func drawArrow(start: NSPoint, end: NSPoint, color: NSColor, lineWidth: CGFloat) {
-        color.setStroke()
-        color.setFill()
-        let angle = atan2(end.y - start.y, end.x - start.x)
-        let headLength: CGFloat = 18
-        let headAngle: CGFloat = .pi / 7
-        let arrowLength = hypot(end.x - start.x, end.y - start.y)
-        let shaftInset = min(headLength * 0.72, max(0, arrowLength - lineWidth))
-        let shaftEnd = NSPoint(x: end.x - shaftInset * cos(angle), y: end.y - shaftInset * sin(angle))
-
-        let path = NSBezierPath()
-        path.move(to: start)
-        path.line(to: shaftEnd)
-        path.lineWidth = lineWidth
-        path.lineCapStyle = .round
-        path.stroke()
-
-        let p1 = NSPoint(x: end.x - headLength * cos(angle - headAngle), y: end.y - headLength * sin(angle - headAngle))
-        let p2 = NSPoint(x: end.x - headLength * cos(angle + headAngle), y: end.y - headLength * sin(angle + headAngle))
-        let head = NSBezierPath()
-        head.move(to: end)
-        head.line(to: p1)
-        head.line(to: p2)
-        head.close()
-        head.fill()
+    func drawArrow(start: NSPoint, end: NSPoint, bend: CGFloat, color: NSColor, lineWidth: CGFloat) {
+        ArrowShape.draw(start: start, end: end, bend: bend, color: color, lineWidth: lineWidth)
     }
 
-    func drawText(_ text: String, at origin: NSPoint, color: NSColor, fontSize: CGFloat) {
-        let size = Self.textSize(text, fontSize: fontSize)
-        text.draw(
-            with: NSRect(origin: origin, size: size),
-            options: [.usesLineFragmentOrigin, .usesFontLeading],
-            attributes: Self.textAttributes(color: color, fontSize: fontSize)
-        )
+    func drawText(_ text: String, at origin: NSPoint, color: NSColor, backgroundColor: NSColor, fontSize: CGFloat) {
+        TextAnnotationStyle.draw(text, at: origin, color: color, backgroundColor: backgroundColor, fontSize: fontSize)
     }
 
     func drawPixelate(_ rect: NSRect, scale: CGFloat, from baseImage: NSImage) {
