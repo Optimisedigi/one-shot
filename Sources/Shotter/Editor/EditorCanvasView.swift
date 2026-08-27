@@ -248,8 +248,8 @@ final class EditorCanvasView: NSView {
             undoLastChange()
         } else if event.keyCode == 53 {
             cancelEditingOrClose()
-        } else if event.keyCode == 51, !annotations.isEmpty {
-            deleteLastAnnotation()
+        } else if event.keyCode == 51 {
+            deleteSelectedAnnotation()
         } else if event.charactersIgnoringModifiers == "+" || event.charactersIgnoringModifiers == "=" {
             zoom = min(zoom * 1.2, 6)
             needsDisplay = true
@@ -281,11 +281,16 @@ final class EditorCanvasView: NSView {
         needsDisplay = true
     }
 
-    private func deleteLastAnnotation() {
+    private func deleteSelectedAnnotation() {
+        guard let index = selectedAnnotationIndex, annotations.indices.contains(index) else { return }
         recordUndoState()
-        annotations.removeLast()
+        annotations.remove(at: index)
         pixelateCache.removeAll()
-        selectedAnnotationIndex = annotations.indices.last
+        if annotations.isEmpty {
+            selectedAnnotationIndex = nil
+        } else {
+            selectedAnnotationIndex = min(index, annotations.count - 1)
+        }
         needsDisplay = true
     }
 
@@ -501,9 +506,9 @@ final class EditorCanvasView: NSView {
         // Default 5pt padding would offset the text from the card inset we
         // measure with, clipping the right edge.
         textView.textContainer?.lineFragmentPadding = 0
-        textView.drawsBackground = true
+        textView.drawsBackground = false
         textView.wantsLayer = true
-        textView.layer?.masksToBounds = true
+        textView.layer?.masksToBounds = false
         textView.delegate = self
         addSubview(textView)
         activeTextView = textView
@@ -536,12 +541,18 @@ final class EditorCanvasView: NSView {
         let viewFontSize = Self.textFontSize * (imageRect.width / max(baseImage.size.width, 1))
         let pad = TextAnnotationStyle.padding(for: viewFontSize)
         textView.font = TextAnnotationStyle.font(ofSize: viewFontSize)
-        textView.backgroundColor = Self.textBackground
+        textView.backgroundColor = .clear
         textView.textColor = Self.textColor
         textView.insertionPointColor = Self.textColor
         textView.typingAttributes = TextAnnotationStyle.attributes(color: Self.textColor, fontSize: viewFontSize)
         textView.textContainerInset = pad
+        textView.layer?.backgroundColor = Self.textBackground.cgColor
         textView.layer?.cornerRadius = TextAnnotationStyle.cornerRadius(for: viewFontSize)
+        let shadow = TextAnnotationStyle.cardShadow(for: viewFontSize)
+        textView.layer?.shadowColor = shadow.shadowColor?.cgColor
+        textView.layer?.shadowOpacity = 1
+        textView.layer?.shadowRadius = shadow.shadowBlurRadius
+        textView.layer?.shadowOffset = NSSize(width: shadow.shadowOffset.width, height: -shadow.shadowOffset.height)
         textView.minSize = NSSize(width: pad.width * 2, height: pad.height * 2)
         sizeInlineTextToFit()
     }
