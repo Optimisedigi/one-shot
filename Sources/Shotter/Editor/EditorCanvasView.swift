@@ -1,7 +1,7 @@
 import AppKit
 
 final class EditorCanvasView: NSView {
-    private static let resizeDragSensitivity: CGFloat = 0.35
+    private static let resizeDragSensitivity: CGFloat = 0.22
 
     weak var windowController: EditorWindowController?
 
@@ -47,8 +47,14 @@ final class EditorCanvasView: NSView {
     private static var textColor: NSColor = TextAnnotationStyle.defaultColor
     private static var textBackground: NSColor = TextAnnotationStyle.defaultBackgroundColor
     private var selectedAnnotationIndex: Int? {
-        didSet { onSelectionChange?(selectedAnnotationColor, selectedAnnotationBorderColor, selectedAnnotationWeight) }
+        didSet {
+            onSelectionChange?(selectedAnnotationColor, selectedAnnotationBorderColor, selectedAnnotationWeight)
+            updateSelectionToolbar()
+        }
     }
+    /// Font/color toolbar shown above an already-committed text annotation
+    /// whenever it's (re)selected, so it isn't only visible while first typing.
+    private var selectionTextToolbar: InlineTextToolbar?
     private var zoom: CGFloat = 1
     private var activeNumberField: NSTextField?
     private var activeNumberFieldIndex: Int?
@@ -181,9 +187,11 @@ final class EditorCanvasView: NSView {
             dragPath.append(point)
         case .moving(let index, let offset):
             moveAnnotation(at: index, to: point, offset: offset)
+            positionSelectionToolbar()
         case .resizing(let index, let handle, let originalBounds):
             resizeAnnotation(at: index, handle: handle, originalBounds: originalBounds, to: point)
             onSelectionChange?(selectedAnnotationColor, selectedAnnotationBorderColor, selectedAnnotationWeight)
+            positionSelectionToolbar()
         case nil:
             break
         }
@@ -579,6 +587,53 @@ final class EditorCanvasView: NSView {
         var y = textView.frame.maxY + 8
         if y + size.height > bounds.maxY {
             y = max(4, textView.frame.minY - size.height - 8)
+        }
+        toolbar.frame = NSRect(x: x, y: y, width: size.width, height: size.height)
+    }
+
+    /// Shows (or hides) the font/color toolbar for the current selection.
+    /// Only one of this and `activeTextToolbar` (the create/edit-time one) is
+    /// ever on screen at once.
+    private func updateSelectionToolbar() {
+        selectionTextToolbar?.removeFromSuperview()
+        selectionTextToolbar = nil
+        guard activeTextView == nil,
+              let index = selectedAnnotationIndex, annotations.indices.contains(index),
+              case .text = annotations[index].kind else { return }
+
+        let annotation = annotations[index]
+        let toolbar = InlineTextToolbar(fontSize: weight(for: annotation), color: annotation.color, backgroundColor: annotation.borderColor)
+        toolbar.onFontSize = { [weak self] size in
+            Self.textFontSize = size
+            self?.applyWeightToSelectedAnnotation(size)
+            self?.positionSelectionToolbar()
+        }
+        toolbar.onColor = { [weak self] color in
+            Self.textColor = color
+            self?.applyColorToSelectedAnnotation(color)
+        }
+        toolbar.onBackgroundColor = { [weak self] color in
+            Self.textBackground = color
+            self?.applyBorderColorToSelectedAnnotation(color)
+        }
+        addSubview(toolbar)
+        selectionTextToolbar = toolbar
+        positionSelectionToolbar()
+    }
+
+    /// Keeps the selection toolbar glued above the text box as it's moved or resized.
+    private func positionSelectionToolbar() {
+        guard let toolbar = selectionTextToolbar,
+              let index = selectedAnnotationIndex, annotations.indices.contains(index) else { return }
+        let imageBounds = annotationBounds(annotations[index])
+        let origin = viewPoint(fromImagePoint: imageBounds.origin)
+        let farCorner = viewPoint(fromImagePoint: NSPoint(x: imageBounds.maxX, y: imageBounds.maxY))
+        let bounds = NSRect(x: min(origin.x, farCorner.x), y: min(origin.y, farCorner.y), width: abs(farCorner.x - origin.x), height: abs(farCorner.y - origin.y))
+        let size = toolbar.fittingSize
+        let x = min(max(4, bounds.minX), max(4, self.bounds.width - size.width - 4))
+        var y = bounds.maxY + 8
+        if y + size.height > self.bounds.maxY {
+            y = max(4, bounds.minY - size.height - 8)
         }
         toolbar.frame = NSRect(x: x, y: y, width: size.width, height: size.height)
     }
