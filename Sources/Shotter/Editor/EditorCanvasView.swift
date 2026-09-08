@@ -2,6 +2,8 @@ import AppKit
 
 final class EditorCanvasView: NSView {
     private static let resizeDragSensitivity: CGFloat = 0.22
+    /// Boxes/pixelate stretch; a bit quicker than uniform scale so edges don't feel sluggish.
+    private static let stretchDragSensitivity: CGFloat = 0.38
 
     weak var windowController: EditorWindowController?
 
@@ -902,10 +904,10 @@ final class EditorCanvasView: NSView {
     }
 
     /// Edge handles change only that axis; corners change both independently.
-    /// Size follows grab-delta * 0.22 so a small drag does not jump the box 1:1.
+    /// Size follows grab-delta * stretchDragSensitivity so a small drag does not jump 1:1.
     private func stretchedRect(_ original: NSRect, handle: ResizeHandle, from grabPoint: NSPoint, to point: NSPoint) -> NSRect {
-        let dx = (point.x - grabPoint.x) * Self.resizeDragSensitivity
-        let dy = (point.y - grabPoint.y) * Self.resizeDragSensitivity
+        let dx = (point.x - grabPoint.x) * Self.stretchDragSensitivity
+        let dy = (point.y - grabPoint.y) * Self.stretchDragSensitivity
         var minX = original.minX
         var minY = original.minY
         var maxX = original.maxX
