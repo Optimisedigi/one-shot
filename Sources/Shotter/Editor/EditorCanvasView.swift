@@ -12,10 +12,15 @@ final class EditorCanvasView: NSView {
     private var baseImage: NSImage
     private var annotations: [Annotation] = []
     private var undoStack: [[Annotation]] = []
+    /// In-app duplicate of the last copied annotation. Independent of the
+    /// system pasteboard so Cmd-C of a shape never replaces the screenshot copy.
+    private var copiedAnnotation: Annotation?
+    /// How many times the current clipboard has been pasted, so each copy steps aside.
+    private var pasteCount = 0
     private enum DragMode {
         case drawing(start: NSPoint, current: NSPoint)
         case moving(index: Int, offset: NSPoint)
-        case resizing(index: Int, handle: ResizeHandle, originalBounds: NSRect)
+        case resizing(index: Int, handle: ResizeHandle, originalBounds: NSRect, grabPoint: NSPoint)
     }
 
     private enum ResizeHandle: CaseIterable {
@@ -23,6 +28,17 @@ final class EditorCanvasView: NSView {
         case bottomRight
         case topLeft
         case topRight
+        case left
+        case right
+        case top
+        case bottom
+
+        var isCorner: Bool {
+            switch self {
+            case .bottomLeft, .bottomRight, .topLeft, .topRight: return true
+            case .left, .right, .top, .bottom: return false
+            }
+        }
     }
 
     private struct PixelateCacheKey: Hashable {
@@ -78,7 +94,7 @@ final class EditorCanvasView: NSView {
     }
 
     var isEditingText: Bool {
-        activeTextView != nil
+        activeTextView != nil || activeNumberField != nil
     }
 
     init(image: NSImage) {
@@ -131,7 +147,12 @@ final class EditorCanvasView: NSView {
         if let handleHit = resizeHandleHit(at: point) {
             recordUndoState()
             selectedAnnotationIndex = handleHit.index
-            dragMode = .resizing(index: handleHit.index, handle: handleHit.handle, originalBounds: annotationBounds(annotations[handleHit.index]))
+            dragMode = .resizing(
+                index: handleHit.index,
+                handle: handleHit.handle,
+                originalBounds: annotationBounds(annotations[handleHit.index]),
+                grabPoint: point
+            )
             needsDisplay = true
             return
         }
@@ -188,8 +209,8 @@ final class EditorCanvasView: NSView {
         case .moving(let index, let offset):
             moveAnnotation(at: index, to: point, offset: offset)
             positionSelectionToolbar()
-        case .resizing(let index, let handle, let originalBounds):
-            resizeAnnotation(at: index, handle: handle, originalBounds: originalBounds, to: point)
+        case .resizing(let index, let handle, let originalBounds, let grabPoint):
+            resizeAnnotation(at: index, handle: handle, originalBounds: originalBounds, from: grabPoint, to: point)
             onSelectionChange?(selectedAnnotationColor, selectedAnnotationBorderColor, selectedAnnotationWeight)
             positionSelectionToolbar()
         case nil:
@@ -241,7 +262,7 @@ final class EditorCanvasView: NSView {
             default:
                 return
             }
-        case .moving(let index, _), .resizing(let index, _, _):
+        case .moving(let index, _), .resizing(let index, _, _, _):
             selectedAnnotationIndex = index
         }
     }
@@ -251,7 +272,9 @@ final class EditorCanvasView: NSView {
             commitActiveText()
             savePNGToDesktop(closeAfterSave: true)
         } else if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "c", activeTextView == nil {
-            copyToClipboard()
+            copySelectionOrImage()
+        } else if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "v", activeTextView == nil {
+            pasteCopiedAnnotation()
         } else if isUndoShortcut(event) {
             undoLastChange()
         } else if event.keyCode == 53 {
@@ -305,6 +328,33 @@ final class EditorCanvasView: NSView {
     private func recordUndoState() {
         pixelateCache.removeAll()
         undoStack.append(annotations)
+    }
+
+    /// Cmd-C: duplicate the selected shape, or copy the screenshot if nothing is selected.
+    func copySelectionOrImage() {
+        if copySelectedAnnotation() { return }
+        copyToClipboard()
+    }
+
+    @discardableResult
+    func copySelectedAnnotation() -> Bool {
+        guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else { return false }
+        copiedAnnotation = annotations[selectedAnnotationIndex]
+        pasteCount = 0
+        return true
+    }
+
+    func pasteCopiedAnnotation() {
+        commitActiveText()
+        commitActiveNumberEdit(apply: true)
+        guard var copy = copiedAnnotation else { return }
+        recordUndoState()
+        pasteCount += 1
+        let step = CGFloat(pasteCount) * 24
+        copy.kind = offsetKind(copy.kind, by: NSPoint(x: step, y: -step))
+        annotations.append(copy)
+        selectedAnnotationIndex = annotations.indices.last
+        needsDisplay = true
     }
 
     /// Saves like Cmd-S, then puts the saved *file* on the pasteboard rather
@@ -776,11 +826,33 @@ final class EditorCanvasView: NSView {
         NSRect(x: center.x - radius, y: center.y - radius, width: radius * 2, height: radius * 2)
     }
 
+    private func offsetKind(_ kind: Annotation.Kind, by delta: NSPoint) -> Annotation.Kind {
+        switch kind {
+        case .rectangle(let rect):
+            return .rectangle(rect.offsetBy(dx: delta.x, dy: delta.y))
+        case .pixelate(let rect):
+            return .pixelate(rect.offsetBy(dx: delta.x, dy: delta.y))
+        case .arrow(let start, let end, let bend):
+            return .arrow(
+                start: NSPoint(x: start.x + delta.x, y: start.y + delta.y),
+                end: NSPoint(x: end.x + delta.x, y: end.y + delta.y),
+                bend: bend
+            )
+        case .text(let text, let origin, let fontSize):
+            return .text(text, origin: NSPoint(x: origin.x + delta.x, y: origin.y + delta.y), fontSize: fontSize)
+        case .step(let number, let center, let radius):
+            return .step(number: number, center: NSPoint(x: center.x + delta.x, y: center.y + delta.y), radius: radius)
+        }
+    }
+
     private func resizeHandleHit(at point: NSPoint) -> (index: Int, handle: ResizeHandle)? {
         guard let selectedAnnotationIndex, annotations.indices.contains(selectedAnnotationIndex) else { return nil }
         guard annotations[selectedAnnotationIndex].isResizable else { return nil }
         let bounds = annotationBounds(annotations[selectedAnnotationIndex])
-        return ResizeHandle.allCases.first { handleRect(for: $0, in: bounds).contains(point) }.map { (selectedAnnotationIndex, $0) }
+        let handles = annotations[selectedAnnotationIndex].allowsIndependentResize
+            ? ResizeHandle.allCases
+            : ResizeHandle.allCases.filter(\.isCorner)
+        return handles.first { handleRect(for: $0, in: bounds).contains(point) }.map { (selectedAnnotationIndex, $0) }
     }
 
     private func handleRect(for handle: ResizeHandle, in rect: NSRect) -> NSRect {
@@ -794,44 +866,75 @@ final class EditorCanvasView: NSView {
             center = NSPoint(x: rect.minX, y: rect.maxY)
         case .topRight:
             center = NSPoint(x: rect.maxX, y: rect.maxY)
+        case .left:
+            center = NSPoint(x: rect.minX, y: rect.midY)
+        case .right:
+            center = NSPoint(x: rect.maxX, y: rect.midY)
+        case .top:
+            center = NSPoint(x: rect.midX, y: rect.maxY)
+        case .bottom:
+            center = NSPoint(x: rect.midX, y: rect.minY)
         }
         return NSRect(x: center.x - 5, y: center.y - 5, width: 10, height: 10)
     }
 
-    private func resizeAnnotation(at index: Int, handle: ResizeHandle, originalBounds: NSRect, to point: NSPoint) {
+    private func resizeAnnotation(at index: Int, handle: ResizeHandle, originalBounds: NSRect, from grabPoint: NSPoint, to point: NSPoint) {
         guard annotations.indices.contains(index) else { return }
-        let anchor = anchorPoint(opposite: handle, in: originalBounds)
-        let originalDistance = distance(anchor, cornerPoint(handle, in: originalBounds))
-        guard originalDistance > 0 else { return }
-        let rawScale = max(0.1, distance(anchor, point) / originalDistance)
-        let scale = resizeScale(from: rawScale)
         switch annotations[index].kind {
         case .rectangle:
-            let width = max(2, originalBounds.width * scale)
-            let height = max(2, originalBounds.height * scale)
-            let rect = rectFrom(anchor: anchor, handle: handle, size: NSSize(width: width, height: height))
-            annotations[index].kind = .rectangle(rect)
+            annotations[index].kind = .rectangle(stretchedRect(originalBounds, handle: handle, from: grabPoint, to: point))
         case .pixelate:
-            let width = max(2, originalBounds.width * scale)
-            let height = max(2, originalBounds.height * scale)
-            let rect = rectFrom(anchor: anchor, handle: handle, size: NSSize(width: width, height: height))
-            annotations[index].kind = .pixelate(rect)
+            annotations[index].kind = .pixelate(stretchedRect(originalBounds, handle: handle, from: grabPoint, to: point))
         case .text(let text, _, let fontSize):
+            let scale = uniformResizeScale(handle: handle, originalBounds: originalBounds, to: point)
             let newFontSize = clamp(fontSize * scale, min: Annotation.minimumTextFontSize, max: Annotation.maximumTextFontSize)
             let newBounds = textBounds(for: text, at: originalBounds.origin, fontSize: newFontSize)
             let newOrigin = textOriginForResize(handle: handle, originalBounds: originalBounds, newBounds: newBounds, fontSize: newFontSize)
             annotations[index].kind = .text(text, origin: newOrigin, fontSize: newFontSize)
         case .step(let number, _, let radius):
+            let scale = uniformResizeScale(handle: handle, originalBounds: originalBounds, to: point)
             let newRadius = clamp(radius * scale, min: Annotation.minimumStepRadius, max: Annotation.maximumStepRadius)
-            let newBounds = rectFrom(anchor: anchor, handle: handle, size: NSSize(width: newRadius * 2, height: newRadius * 2))
+            let newBounds = rectFrom(anchor: anchorPoint(opposite: handle, in: originalBounds), handle: handle, size: NSSize(width: newRadius * 2, height: newRadius * 2))
             annotations[index].kind = .step(number: number, center: NSPoint(x: newBounds.midX, y: newBounds.midY), radius: newRadius)
         case .arrow:
             break
         }
     }
 
-    private func resizeScale(from rawScale: CGFloat) -> CGFloat {
-        1 + ((rawScale - 1) * Self.resizeDragSensitivity)
+    /// Edge handles change only that axis; corners change both independently.
+    /// Size follows grab-delta * 0.22 so a small drag does not jump the box 1:1.
+    private func stretchedRect(_ original: NSRect, handle: ResizeHandle, from grabPoint: NSPoint, to point: NSPoint) -> NSRect {
+        let dx = (point.x - grabPoint.x) * Self.resizeDragSensitivity
+        let dy = (point.y - grabPoint.y) * Self.resizeDragSensitivity
+        var minX = original.minX
+        var minY = original.minY
+        var maxX = original.maxX
+        var maxY = original.maxY
+        switch handle {
+        case .left, .topLeft, .bottomLeft:
+            minX = min(original.minX + dx, maxX - 2)
+        case .right, .topRight, .bottomRight:
+            maxX = max(original.maxX + dx, minX + 2)
+        case .top, .bottom:
+            break
+        }
+        switch handle {
+        case .bottom, .bottomLeft, .bottomRight:
+            minY = min(original.minY + dy, maxY - 2)
+        case .top, .topLeft, .topRight:
+            maxY = max(original.maxY + dy, minY + 2)
+        case .left, .right:
+            break
+        }
+        return NSRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
+    private func uniformResizeScale(handle: ResizeHandle, originalBounds: NSRect, to point: NSPoint) -> CGFloat {
+        let anchor = anchorPoint(opposite: handle, in: originalBounds)
+        let originalDistance = distance(anchor, handlePoint(handle, in: originalBounds))
+        guard originalDistance > 0 else { return 1 }
+        let rawScale = max(0.1, distance(anchor, point) / originalDistance)
+        return 1 + ((rawScale - 1) * Self.resizeDragSensitivity)
     }
 
     private func anchorPoint(opposite handle: ResizeHandle, in rect: NSRect) -> NSPoint {
@@ -844,10 +947,18 @@ final class EditorCanvasView: NSView {
             return NSPoint(x: rect.maxX, y: rect.minY)
         case .topRight:
             return NSPoint(x: rect.minX, y: rect.minY)
+        case .left:
+            return NSPoint(x: rect.maxX, y: rect.midY)
+        case .right:
+            return NSPoint(x: rect.minX, y: rect.midY)
+        case .top:
+            return NSPoint(x: rect.midX, y: rect.minY)
+        case .bottom:
+            return NSPoint(x: rect.midX, y: rect.maxY)
         }
     }
 
-    private func cornerPoint(_ handle: ResizeHandle, in rect: NSRect) -> NSPoint {
+    private func handlePoint(_ handle: ResizeHandle, in rect: NSRect) -> NSPoint {
         switch handle {
         case .bottomLeft:
             return NSPoint(x: rect.minX, y: rect.minY)
@@ -857,6 +968,14 @@ final class EditorCanvasView: NSView {
             return NSPoint(x: rect.minX, y: rect.maxY)
         case .topRight:
             return NSPoint(x: rect.maxX, y: rect.maxY)
+        case .left:
+            return NSPoint(x: rect.minX, y: rect.midY)
+        case .right:
+            return NSPoint(x: rect.maxX, y: rect.midY)
+        case .top:
+            return NSPoint(x: rect.midX, y: rect.maxY)
+        case .bottom:
+            return NSPoint(x: rect.midX, y: rect.minY)
         }
     }
 
@@ -865,11 +984,11 @@ final class EditorCanvasView: NSView {
         switch handle {
         case .bottomLeft:
             return NSPoint(x: originalBounds.maxX - newBounds.width + pad.width, y: originalBounds.maxY - newBounds.height + pad.height)
-        case .bottomRight:
+        case .bottomRight, .bottom:
             return NSPoint(x: originalBounds.minX + pad.width, y: originalBounds.maxY - newBounds.height + pad.height)
-        case .topLeft:
+        case .topLeft, .left:
             return NSPoint(x: originalBounds.maxX - newBounds.width + pad.width, y: originalBounds.minY + pad.height)
-        case .topRight:
+        case .topRight, .top, .right:
             return NSPoint(x: originalBounds.minX + pad.width, y: originalBounds.minY + pad.height)
         }
     }
@@ -884,6 +1003,14 @@ final class EditorCanvasView: NSView {
             return NSRect(x: anchor.x - size.width, y: anchor.y, width: size.width, height: size.height)
         case .topRight:
             return NSRect(origin: anchor, size: size)
+        case .left:
+            return NSRect(x: anchor.x - size.width, y: anchor.y - size.height / 2, width: size.width, height: size.height)
+        case .right:
+            return NSRect(x: anchor.x, y: anchor.y - size.height / 2, width: size.width, height: size.height)
+        case .top:
+            return NSRect(x: anchor.x - size.width / 2, y: anchor.y, width: size.width, height: size.height)
+        case .bottom:
+            return NSRect(x: anchor.x - size.width / 2, y: anchor.y - size.height, width: size.width, height: size.height)
         }
     }
 
@@ -892,10 +1019,10 @@ final class EditorCanvasView: NSView {
         switch annotation.kind {
         case .rectangle(let rect):
             drawDashedRect(rect.insetBy(dx: -6, dy: -6))
-            drawResizeHandles(for: rect)
+            drawResizeHandles(for: rect, includingEdges: true)
         case .pixelate(let rect):
             drawDashedRect(rect.insetBy(dx: -6, dy: -6))
-            drawResizeHandles(for: rect)
+            drawResizeHandles(for: rect, includingEdges: true)
         case .arrow(let start, let end, let bend):
             let path = NSBezierPath()
             for point in ArrowShape.sampledPoints(start: start, end: end, bend: bend) {
@@ -906,14 +1033,14 @@ final class EditorCanvasView: NSView {
             path.stroke()
         case .text(let text, let origin, let fontSize):
             drawDashedRect(textBounds(for: text, at: origin, fontSize: fontSize))
-            drawResizeHandles(for: textBounds(for: text, at: origin, fontSize: fontSize))
+            drawResizeHandles(for: textBounds(for: text, at: origin, fontSize: fontSize), includingEdges: false)
         case .step(_, let center, let radius):
             let bounds = stepBounds(center: center, radius: radius)
             let path = NSBezierPath(ovalIn: bounds.insetBy(dx: -6, dy: -6))
             path.lineWidth = 2
             path.setLineDash([6, 4], count: 2, phase: 0)
             path.stroke()
-            drawResizeHandles(for: bounds)
+            drawResizeHandles(for: bounds, includingEdges: false)
         }
     }
 
@@ -924,10 +1051,11 @@ final class EditorCanvasView: NSView {
         path.stroke()
     }
 
-    private func drawResizeHandles(for rect: NSRect) {
+    private func drawResizeHandles(for rect: NSRect, includingEdges: Bool) {
         NSColor.white.setFill()
         NSColor.systemBlue.setStroke()
-        for handle in ResizeHandle.allCases {
+        let handles = includingEdges ? ResizeHandle.allCases : ResizeHandle.allCases.filter(\.isCorner)
+        for handle in handles {
             let handleRect = handleRect(for: handle, in: rect)
             let path = NSBezierPath(rect: handleRect)
             path.fill()
@@ -1061,6 +1189,16 @@ private extension Annotation {
         case .rectangle, .pixelate, .text, .step:
             return true
         case .arrow:
+            return false
+        }
+    }
+
+    /// Boxes and pixelate can stretch on one axis; text and steps stay uniform.
+    var allowsIndependentResize: Bool {
+        switch kind {
+        case .rectangle, .pixelate:
+            return true
+        case .text, .step, .arrow:
             return false
         }
     }

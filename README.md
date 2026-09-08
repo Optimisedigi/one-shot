@@ -55,7 +55,8 @@ The certificate is local to your Mac, self-signed, and used only to sign this ap
 | --- | --- |
 | Capture a region | **⌘⇧2**, then drag |
 | Save to Desktop | **⌘S** (closes the editor) |
-| Copy to clipboard | **⌘C** |
+| Copy to clipboard | **⌘C** (copies the selected shape if one is selected) |
+| Paste a copied shape | **⌘V** |
 | Undo | **⌘Z** |
 | Delete last annotation | **Delete** |
 | Zoom in / out / reset | **+** / **-** / **0** |
@@ -63,7 +64,8 @@ The certificate is local to your Mac, self-signed, and used only to sign this ap
 
 **Annotation tools:** Rectangle, Arrow, Text, Pixelate (to hide sensitive info), and Step badges (numbered circles for walkthroughs).
 
-- Click a shape to select it, then drag to move or use the corner handles to resize.
+- Click a shape to select it, then drag to move. Corner handles resize; on boxes, edge handles stretch just width or height.
+- **⌘C** / **⌘V** duplicates the selected box, text, number, or arrow. Paste as many times as you want (including the same number). With nothing selected, **⌘C** still copies the screenshot.
 - Selecting a shape lets you change its color and thickness from the toolbar.
 - Double-click a Step badge to edit its number.
 - Picking a different tool and clicking inside an existing shape draws a new one instead of moving the old one.

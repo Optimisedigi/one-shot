@@ -32,7 +32,10 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             return !self.canvasView.isEditingText
         }
         window.onCopy = { [weak self] in
-            self?.canvasView.copyToClipboard()
+            self?.canvasView.copySelectionOrImage()
+        }
+        window.onPaste = { [weak self] in
+            self?.canvasView.pasteCopiedAnnotation()
         }
         window.onCancel = { [weak self] in
             self?.canvasView.cancelEditingOrClose()
@@ -57,6 +60,7 @@ private final class EditorWindow: NSWindow {
     var onQuickSave: (() -> Void)?
     var canCopyImage: (() -> Bool)?
     var onCopy: (() -> Void)?
+    var onPaste: (() -> Void)?
     var onCancel: (() -> Void)?
     var onUndo: (() -> Void)?
 
@@ -88,6 +92,12 @@ private final class EditorWindow: NSWindow {
            event.charactersIgnoringModifiers?.lowercased() == "c",
            canCopyImage?() == true {
             onCopy?()
+            return true
+        }
+        if event.modifierFlags.intersection(.deviceIndependentFlagsMask).contains(.command),
+           event.charactersIgnoringModifiers?.lowercased() == "v",
+           canCopyImage?() == true {
+            onPaste?()
             return true
         }
         return super.performKeyEquivalent(with: event)
