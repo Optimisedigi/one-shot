@@ -4,6 +4,10 @@ A fast, native macOS screenshot and annotation app. Capture a region with a hotk
 
 The installed app is named **Shotter**. It lives in the menu bar, not the Dock. It needs macOS 13 or later.
 
+![Shotter editor with a curved arrow and a text label on a photo of Half Dome](docs/editor.png)
+
+![Saved annotation: a red arrow pointing at Half Dome, labeled half dome](docs/annotation.png)
+
 ---
 
 ## Download
