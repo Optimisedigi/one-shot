@@ -11,7 +11,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         stack.orientation = .vertical
         stack.spacing = 0
         stack.distribution = .fill
-        toolbar.heightAnchor.constraint(equalToConstant: 58).isActive = true
+        toolbar.heightAnchor.constraint(equalToConstant: 52).isActive = true
 
         let window = EditorWindow(
             contentRect: NSRect(x: 0, y: 0, width: max(760, image.size.width + 80), height: max(520, image.size.height + 120)),

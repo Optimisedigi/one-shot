@@ -53,13 +53,13 @@ final class InlineTextToolbar: NSView {
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
 
-        stack.addArrangedSubview(textButton("A−", action: #selector(shrink), toolTip: "Smaller text"))
+        stack.addArrangedSubview(textButton("−", action: #selector(shrink), toolTip: "Smaller text"))
         sizeLabel.font = .systemFont(ofSize: 12, weight: .semibold)
         sizeLabel.textColor = .black
         sizeLabel.alignment = .center
         sizeLabel.widthAnchor.constraint(equalToConstant: 24).isActive = true
         stack.addArrangedSubview(sizeLabel)
-        stack.addArrangedSubview(textButton("A+", action: #selector(grow), toolTip: "Bigger text"))
+        stack.addArrangedSubview(textButton("+", action: #selector(grow), toolTip: "Bigger text"))
 
         stack.addArrangedSubview(separator())
         textSwatches = Self.textColors.enumerated().map { index, swatchColor in

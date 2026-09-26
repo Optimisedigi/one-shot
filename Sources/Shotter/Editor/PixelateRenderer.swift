@@ -1,8 +1,6 @@
 import AppKit
-import CoreImage
 
 enum PixelateRenderer {
-    private static let context = CIContext()
 
     static func pixelatedImage(from baseImage: NSImage, rect: NSRect, scale: CGFloat) -> NSImage? {
         guard rect.width > 0, rect.height > 0,
@@ -17,23 +15,34 @@ enum PixelateRenderer {
             height: rect.height * scaleY
         ).integral.intersection(CGRect(x: 0, y: 0, width: cgImage.width, height: cgImage.height))
         guard !cropRect.isNull, !cropRect.isEmpty,
-              let croppedCGImage = cgImage.cropping(to: cropRect),
-              let filter = CIFilter(name: "CIPixellate") else { return nil }
+              let croppedCGImage = cgImage.cropping(to: cropRect) else { return nil }
 
-        let ciImage = CIImage(cgImage: croppedCGImage)
-        let extent = ciImage.extent
-        // `scale` is expressed in on-screen points; convert it to the base
-        // image's actual pixel density so the mosaic blocks stay visibly
-        // chunky (a real TV/police-style pixelation) instead of shrinking to
-        // near-invisible squares on Retina screenshots.
+        // Downscale to a handful of samples, then blow those samples back up
+        // with nearest-neighbor so each block is one flat color. CIPixellate
+        // leaves pale gaps between blocks, which reads as a zoomed crop rather
+        // than something being hidden.
         let devicePixelScale = max(scaleX, scaleY, 1)
-        let blockSize = max(scale, Annotation.minimumPixelBlockScale) * devicePixelScale
-        filter.setValue(ciImage, forKey: kCIInputImageKey)
-        filter.setValue(blockSize, forKey: kCIInputScaleKey)
-        filter.setValue(CIVector(x: extent.midX, y: extent.midY), forKey: kCIInputCenterKey)
+        let block = max(scale, Annotation.minimumPixelBlockScale) * devicePixelScale
+        let columns = max(1, Int((cropRect.width / block).rounded(.down)))
+        let rows = max(1, Int((cropRect.height / block).rounded(.down)))
+        guard let tiny = resample(croppedCGImage, width: columns, height: rows, interpolate: false),
+              let mosaic = resample(tiny, width: croppedCGImage.width, height: croppedCGImage.height, interpolate: false) else { return nil }
+        return NSImage(cgImage: mosaic, size: rect.size)
+    }
 
-        guard let outputImage = filter.outputImage?.cropped(to: extent),
-              let outputCGImage = context.createCGImage(outputImage, from: extent) else { return nil }
-        return NSImage(cgImage: outputCGImage, size: rect.size)
+    private static func resample(_ image: CGImage, width: Int, height: Int, interpolate: Bool) -> CGImage? {
+        guard width > 0, height > 0,
+              let context = CGContext(
+                data: nil,
+                width: width,
+                height: height,
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: CGColorSpaceCreateDeviceRGB(),
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+              ) else { return nil }
+        context.interpolationQuality = interpolate ? .high : .none
+        context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+        return context.makeImage()
     }
 }

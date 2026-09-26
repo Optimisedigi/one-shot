@@ -577,7 +577,7 @@ final class EditorCanvasView: NSView {
         let toolbar = InlineTextToolbar(fontSize: Self.textFontSize, color: Self.textColor, backgroundColor: Self.textBackground)
         toolbar.onFontSize = { [weak self] size in
             Self.textFontSize = size
-            self?.applyInlineTextStyle()
+            self?.applyInlineTextStyle(repositionToolbar: false)
         }
         toolbar.onColor = { [weak self] color in
             Self.textColor = color
@@ -596,7 +596,9 @@ final class EditorCanvasView: NSView {
 
     /// Keeps the inline editor looking exactly like the committed annotation:
     /// padded rounded card, in the current font size, text and card color.
-    private func applyInlineTextStyle() {
+    /// Font-size changes leave the toolbar where it is; only typing and color
+    /// changes re-place it next to the box.
+    private func applyInlineTextStyle(repositionToolbar: Bool = true) {
         guard let textView = activeTextView else { return }
         let viewFontSize = Self.textFontSize * (imageRect.width / max(baseImage.size.width, 1))
         let pad = TextAnnotationStyle.padding(for: viewFontSize)
@@ -614,10 +616,10 @@ final class EditorCanvasView: NSView {
         textView.layer?.shadowRadius = shadow.shadowBlurRadius
         textView.layer?.shadowOffset = NSSize(width: shadow.shadowOffset.width, height: -shadow.shadowOffset.height)
         textView.minSize = NSSize(width: pad.width * 2, height: pad.height * 2)
-        sizeInlineTextToFit()
+        sizeInlineTextToFit(repositionToolbar: repositionToolbar)
     }
 
-    private func sizeInlineTextToFit() {
+    private func sizeInlineTextToFit(repositionToolbar: Bool = true) {
         guard let textView = activeTextView, let origin = activeTextOrigin else { return }
         let viewFontSize = Self.textFontSize * (imageRect.width / max(baseImage.size.width, 1))
         let pad = TextAnnotationStyle.padding(for: viewFontSize)
@@ -629,7 +631,9 @@ final class EditorCanvasView: NSView {
             width: size.width + pad.width * 2,
             height: size.height + pad.height * 2
         )
-        positionTextToolbar()
+        if repositionToolbar {
+            positionTextToolbar()
+        }
     }
 
     private func positionTextToolbar() {
@@ -658,7 +662,6 @@ final class EditorCanvasView: NSView {
         toolbar.onFontSize = { [weak self] size in
             Self.textFontSize = size
             self?.applyWeightToSelectedAnnotation(size)
-            self?.positionSelectionToolbar()
         }
         toolbar.onColor = { [weak self] color in
             Self.textColor = color

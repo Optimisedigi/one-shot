@@ -60,22 +60,35 @@ enum ArrowShape {
         color.setStroke()
         color.setFill()
 
-        // Direction the head points in: the curve's tangent where it lands.
-        let tangentFrom = point(start: start, end: end, bend: bend, t: 0.92)
+        // Aim the head along the curve's own tangent at the tip. Aiming it
+        // along the straight chord back to the shaft swings the rear corners
+        // off the line once the bend gets tight.
+        let tangentFrom = point(start: start, end: end, bend: bend, t: 0.9)
         let angle = atan2(end.y - tangentFrom.y, end.x - tangentFrom.x)
-        let arrowLength = hypot(end.x - start.x, end.y - start.y)
-        let shaftInset = min(headLength * 0.72, max(0, arrowLength - lineWidth))
+        // The head's notch sits this far back along that tangent. The shaft
+        // runs into the notch, so the two stay joined at any bend.
+        let notch = NSPoint(
+            x: end.x - headLength * cos(headAngle) * cos(angle),
+            y: end.y - headLength * cos(headAngle) * sin(angle)
+        )
 
         let shaft = NSBezierPath()
         shaft.move(to: start)
         if bend == 0 {
-            shaft.line(to: NSPoint(x: end.x - shaftInset * cos(angle), y: end.y - shaftInset * sin(angle)))
+            shaft.line(to: notch)
         } else {
-            // Stop the curve short of the tip so the head isn't drawn over.
-            let shaftEndT = arrowLength > 0 ? max(0.01, 1 - shaftInset / arrowLength) : 1
-            for t in stride(from: CGFloat(0), through: shaftEndT, by: shaftEndT / 24) {
+            // Follow the curve to exactly one head-length short of the tip,
+            // then a straight run into the notch. The head covers that run, so
+            // the line and the head stay joined however tight the bend is.
+            let joinT = shaftJoinT(start: start, end: end, bend: bend)
+            let join = point(start: start, end: end, bend: bend, t: joinT)
+            let steps = 32
+            for index in 1...steps {
+                let t = joinT * CGFloat(index) / CGFloat(steps)
                 shaft.line(to: point(start: start, end: end, bend: bend, t: t))
             }
+            shaft.line(to: join)
+            shaft.line(to: notch)
         }
         shaft.lineWidth = lineWidth
         shaft.lineCapStyle = .round
@@ -90,5 +103,28 @@ enum ArrowShape {
         head.line(to: p2)
         head.close()
         head.fill()
+    }
+
+    /// Parameter one head-length back from the tip, measured along the curve
+    /// and interpolated between samples so it doesn't fall short of the head.
+    /// A straight-line cutoff misses that point once the bend pulls the tip
+    /// back toward the shaft, which is the gap in a tight curve.
+    private static func shaftJoinT(start: NSPoint, end: NSPoint, bend: CGFloat) -> CGFloat {
+        let steps = 64
+        var traveled = CGFloat(0)
+        var previous = end
+        for index in stride(from: steps - 1, through: 0, by: -1) {
+            let t = CGFloat(index) / CGFloat(steps)
+            let sample = point(start: start, end: end, bend: bend, t: t)
+            let segment = hypot(sample.x - previous.x, sample.y - previous.y)
+            if traveled + segment >= headLength {
+                let remaining = headLength - traveled
+                let fraction = segment > 0 ? remaining / segment : 0
+                return t + (CGFloat(index + 1) / CGFloat(steps) - t) * (1 - fraction)
+            }
+            traveled += segment
+            previous = sample
+        }
+        return 0
     }
 }
