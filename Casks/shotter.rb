@@ -7,11 +7,9 @@ cask "shotter" do
   desc "Menu bar screenshot and annotation tool"
   homepage "https://github.com/Optimisedigi/one-shot"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "Shotter.app"
 
-  zap trash: [
-    "~/Library/Preferences/local.shotter.app.plist",
-  ]
+  zap trash: "~/Library/Preferences/local.shotter.app.plist"
 end
