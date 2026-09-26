@@ -1,20 +1,56 @@
 # One Shot
 
-A fast, native macOS screenshot and annotation app. Capture a region with a hotkey, mark it up, save or copy — no browser, no account, no upload.
+A fast, native macOS screenshot and annotation app. Capture a region with a hotkey, mark it up, save or copy. Nothing is uploaded and no account is required.
 
-Built in Swift/AppKit, inspired by lightweight tools like Shottr.
+The installed app is named **Shotter**. It lives in the menu bar, not the Dock. It needs macOS 13 or later.
 
 ---
 
-## Install (macOS)
+## Download
 
-You need **macOS 13+** and Xcode Command Line Tools. If you don't have them, run this first and accept the prompt:
+A signed, notarized installer is **not published yet**. The download and Homebrew commands below are the intended release shape. Do not treat them as working links until a GitHub release exists.
+
+Planned direct download: `Shotter-0.1.0-macOS.dmg` on the GitHub releases page for [Optimisedigi/one-shot](https://github.com/Optimisedigi/one-shot).
+
+When that file is published:
+
+1. Open the DMG.
+2. Drag **Shotter** onto the **Applications** folder.
+3. Eject the disk image and open Shotter from Applications.
+
+Planned Homebrew install, from this repository as a tap:
+
+```bash
+brew tap Optimisedigi/one-shot https://github.com/Optimisedigi/one-shot
+brew install --cask Optimisedigi/one-shot/shotter
+```
+
+Those commands will fail until the cask and the notarized DMG are in the repository.
+
+### Grant Screen Recording, one time
+
+macOS will not let any app read your screen until you allow it. Shotter only captures when you press the hotkey.
+
+1. Press **⌘⇧2** (the default capture hotkey).
+2. macOS shows a permission prompt. Click **Open System Settings**.
+3. Turn **Shotter** on under **Privacy & Security → Screen & System Audio Recording**.
+4. Quit and reopen the app. macOS applies the new permission on restart.
+
+Press **⌘⇧2** again to capture.
+
+---
+
+## Install from source
+
+This path is for people who want to build it themselves. End users should wait for the DMG above.
+
+You need **macOS 13+** and Xcode Command Line Tools:
 
 ```bash
 xcode-select --install
 ```
 
-Then install One Shot with one command:
+Then:
 
 ```bash
 git clone https://github.com/Optimisedigi/one-shot.git
@@ -22,7 +58,7 @@ cd one-shot
 scripts/install-app.sh
 ```
 
-That's it. The script builds the app, signs it, installs it to `/Applications/Shotter.app`, and opens it. It runs in the menu bar (no Dock icon).
+The script builds the app, signs it with a local certificate, installs it to `/Applications/Shotter.app`, and opens it.
 
 ### Grant Screen Recording — required, one time
 
@@ -92,6 +128,30 @@ swift build          # compile
 swift run Shotter    # run unsigned (capture will be blocked by macOS)
 scripts/build-app.sh # build + sign a bundle at .build/Shotter.app without installing
 ```
+
+There is no automated test suite. `swift build` is the compile check.
+
+### Repeatable notarized release
+
+`scripts/release-dmg.sh` builds a universal app (Apple silicon and Intel), signs it with **Developer ID Application: Peter Tu (NSD8UNQK9J)**, notarizes the app and the DMG, staples both tickets, and writes a SHA-256 file next to the DMG. It refuses to finish unless Apple returns Accepted and stapling validates.
+
+Store the notary login in the Keychain once. The password is prompted locally and is not written into the repo:
+
+```bash
+xcrun notarytool store-credentials shotter-notary \
+  --apple-id "YOUR_APPLE_ID" \
+  --team-id NSD8UNQK9J
+```
+
+Use an app-specific password from [appleid.apple.com](https://appleid.apple.com), not your normal Apple ID password. Then:
+
+```bash
+scripts/release-dmg.sh
+```
+
+The result is `dist/Shotter-<version>-macOS.dmg`. Do not commit `dist/`.
+
+This script has not produced a published DMG yet, because the `shotter-notary` Keychain profile is not on this Mac.
 
 ---
 

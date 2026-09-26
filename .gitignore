@@ -1,7 +1,13 @@
 .build/
 .gg/
+dist/
 .DS_Store
 *.xcuserdata/
 *.xcuserstate
 .env
 *.log
+*.p8
+*.p12
+*.cer
+*.mobileprovision
+AuthKey_*
