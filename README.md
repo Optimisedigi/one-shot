@@ -133,7 +133,7 @@ There is no automated test suite. `swift build` is the compile check.
 
 ### Repeatable notarized release
 
-`scripts/release-dmg.sh` builds a universal app (Apple silicon and Intel), signs it with **Developer ID Application: Peter Tu (NSD8UNQK9J)**, notarizes the app and the DMG, staples both tickets, and writes a SHA-256 file next to the DMG. It refuses to finish unless Apple returns Accepted and stapling validates.
+`scripts/release-dmg.sh` refuses to run with uncommitted changes. It builds a universal app (Apple silicon and Intel), signs the executable and then the app with **Developer ID Application: Peter Tu (NSD8UNQK9J)** and the hardened runtime, notarizes the app and the DMG, and stops unless Apple reports **Accepted**. It then staples both tickets, checks Gatekeeper, and writes a SHA-256 file next to the DMG. If Apple is still processing, the staged file and its submission id stay in `dist/`.
 
 Store the notary login in the Keychain once. The password is prompted locally and is not written into the repo:
 
