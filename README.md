@@ -8,24 +8,22 @@ The installed app is named **Shotter**. It lives in the menu bar, not the Dock. 
 
 ## Download
 
-A signed, notarized installer is **not published yet**. The download and Homebrew commands below are the intended release shape. Do not treat them as working links until a GitHub release exists.
+**[Download Shotter 0.1.0 for macOS](https://github.com/Optimisedigi/one-shot/releases/download/v0.1.0/Shotter-0.1.0-macOS.dmg)**
 
-Planned direct download: `Shotter-0.1.0-macOS.dmg` on the GitHub releases page for [Optimisedigi/one-shot](https://github.com/Optimisedigi/one-shot).
-
-When that file is published:
+The disk image is signed and notarized. It runs on macOS 13 or later, on Apple silicon and Intel.
 
 1. Open the DMG.
 2. Drag **Shotter** onto the **Applications** folder.
 3. Eject the disk image and open Shotter from Applications.
 
-Planned Homebrew install, from this repository as a tap:
+SHA-256: `969e5d31dd38580bc101b1ecddacaa61934f28e1f0d36055a6dd5cca71230406`
+
+Or install with Homebrew from this repository:
 
 ```bash
 brew tap Optimisedigi/one-shot https://github.com/Optimisedigi/one-shot
 brew install --cask Optimisedigi/one-shot/shotter
 ```
-
-Those commands will fail until the cask and the notarized DMG are in the repository.
 
 ### Grant Screen Recording, one time
 
@@ -151,7 +149,7 @@ scripts/release-dmg.sh
 
 The result is `dist/Shotter-<version>-macOS.dmg`. Do not commit `dist/`.
 
-This script has not produced a published DMG yet, because the `shotter-notary` Keychain profile is not on this Mac.
+Version 0.1.0 was built from commit `9120d7b`, notarized, and published as the GitHub release `v0.1.0`.
 
 ---
 
