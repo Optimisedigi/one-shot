@@ -1,4 +1,5 @@
 import AppKit
+import ServiceManagement
 
 enum AppMenu {
     static func makeMenu(target: AnyObject) -> NSMenu {
@@ -32,6 +33,24 @@ extension NSAlert {
             alert.alertStyle = .warning
             alert.addButton(withTitle: "OK")
             alert.runModal()
+        }
+    }
+
+    /// Alert with a shortcut to System Settings → Login Items, the one place
+    /// macOS lets users approve (or block) apps that open at login. Safe to
+    /// call from any thread.
+    static func showLoginItemsAlert(message: String, informativeText: String) {
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = message
+            alert.informativeText = informativeText
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Open Login Items Settings")
+            alert.addButton(withTitle: "Later")
+            NSApp.activate(ignoringOtherApps: true)
+            if alert.runModal() == .alertFirstButtonReturn {
+                SMAppService.openSystemSettingsLoginItems()
+            }
         }
     }
 }

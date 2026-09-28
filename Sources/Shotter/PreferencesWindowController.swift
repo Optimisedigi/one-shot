@@ -26,6 +26,8 @@ final class PreferencesWindowController: NSWindowController {
 
     override func showWindow(_ sender: Any?) {
         super.showWindow(sender)
+        // The login item state can change while the window is closed.
+        launchAtLoginButton.state = LaunchAtLoginSettings.isDesired ? .on : .off
         window?.makeKeyAndOrderFront(sender)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -52,7 +54,7 @@ final class PreferencesWindowController: NSWindowController {
         launchAtLoginButton.translatesAutoresizingMaskIntoConstraints = false
         launchAtLoginButton.target = self
         launchAtLoginButton.action = #selector(launchAtLoginChanged)
-        launchAtLoginButton.state = LaunchAtLoginSettings.isEnabled ? .on : .off
+        launchAtLoginButton.state = LaunchAtLoginSettings.isDesired ? .on : .off
 
         contentView.addSubview(titleLabel)
         contentView.addSubview(shortcutPopup)
@@ -100,10 +102,19 @@ final class PreferencesWindowController: NSWindowController {
         let shouldEnable = launchAtLoginButton.state == .on
         do {
             try LaunchAtLoginSettings.setEnabled(shouldEnable)
-            launchAtLoginButton.state = LaunchAtLoginSettings.isEnabled ? .on : .off
+            launchAtLoginButton.state = LaunchAtLoginSettings.isDesired ? .on : .off
+            if shouldEnable, !LaunchAtLoginSettings.isEnabled {
+                // Registered, but macOS opens apps at login only after the user
+                // approves them in System Settings.
+                NSAlert.showLoginItemsAlert(
+                    message: "Approve Shotter in Login Items",
+                    informativeText: "macOS only opens apps at login after you approve them. Turn on Shotter under “Open at Login” in System Settings → General → Login Items, and Shotter will open automatically when you log in."
+                )
+            }
         } catch {
-            launchAtLoginButton.state = LaunchAtLoginSettings.isEnabled ? .on : .off
-            NSAlert.show(message: "Could not update startup setting", informativeText: error.localizedDescription)
+            NSLog("LaunchAtLogin: could not set enabled=\(shouldEnable): \(error)")
+            launchAtLoginButton.state = LaunchAtLoginSettings.isDesired ? .on : .off
+            NSAlert.showLoginItemsAlert(message: "Could not update startup setting", informativeText: error.localizedDescription)
         }
     }
 }

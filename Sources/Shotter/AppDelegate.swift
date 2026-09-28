@@ -7,6 +7,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private lazy var captureCoordinator = CaptureCoordinator()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // SMAppService answers over synchronous XPC that can stall for seconds,
+        // so the login-item repair runs off the main thread.
+        DispatchQueue.global(qos: .utility).async {
+            LaunchAtLoginSettings.syncWithSystem()
+            // The setting promises the app opens at login; when macOS has not
+            // enabled the item (usually pending approval), say so instead of
+            // silently missing the next login.
+            if LaunchAtLoginSettings.isDesired, LaunchAtLoginSettings.requiresApproval {
+                NSAlert.showLoginItemsAlert(
+                    message: "Shotter is waiting for approval to open at login",
+                    informativeText: "macOS only opens apps at login after you approve them. Turn on Shotter under “Open at Login” in System Settings → General → Login Items, and Shotter will open automatically when you log in."
+                )
+            }
+        }
         setupStatusItem()
         _ = setupHotKey()
     }
