@@ -55,6 +55,9 @@ final class EditorCanvasView: NSView {
     /// Points the cursor travelled while drawing, so the Curve tool can turn
     /// the shape of the drag into the arc of the arrow.
     private var dragPath: [NSPoint] = []
+    /// Whether Shift is held during the current drag, pinning new arrows to the
+    /// horizontal or vertical axis they are pulled along.
+    private var dragShiftHeld = false
     private var pixelateCache: [PixelateCacheKey: NSImage] = [:]
     private var activeTextView: MultilineCommittingTextView?
     private var activeTextOrigin: NSPoint?
@@ -142,6 +145,7 @@ final class EditorCanvasView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         window?.makeFirstResponder(self)
+        dragShiftHeld = event.modifierFlags.contains(.shift)
         commitActiveText()
         commitActiveNumberEdit(apply: true)
         let clickCount = event.clickCount
@@ -205,7 +209,8 @@ final class EditorCanvasView: NSView {
         let point = imagePoint(from: event.locationInWindow, clamped: true)
         switch dragMode {
         case .drawing(let start, _):
-            dragMode = .drawing(start: start, current: point)
+            dragShiftHeld = event.modifierFlags.contains(.shift)
+            dragMode = .drawing(start: start, current: drawingEnd(from: start, to: point))
             if dragPath.isEmpty { dragPath.append(start) }
             dragPath.append(point)
         case .moving(let index, let offset):
@@ -231,7 +236,8 @@ final class EditorCanvasView: NSView {
 
         switch dragMode {
         case .drawing(let start, _):
-            let end = imagePoint(from: event.locationInWindow, clamped: true)
+            dragShiftHeld = event.modifierFlags.contains(.shift)
+            let end = drawingEnd(from: start, to: imagePoint(from: event.locationInWindow, clamped: true))
             let rect = Geometry.normalizedRect(from: start, to: end)
             switch tool {
             case .rectangle where rect.width > 2 && rect.height > 2:
@@ -244,7 +250,7 @@ final class EditorCanvasView: NSView {
                 selectedAnnotationIndex = annotations.indices.last
             case .curve where distance(start, end) > 2:
                 recordUndoState()
-                annotations.append(Annotation(kind: .arrow(start: start, end: end, bend: currentDragBend()), lineWidth: Annotation.defaultArrowLineWidth))
+                annotations.append(Annotation(kind: .arrow(start: start, end: end, bend: dragShiftHeld ? 0 : currentDragBend()), lineWidth: Annotation.defaultArrowLineWidth))
                 selectedAnnotationIndex = annotations.indices.last
             case .pixelate where rect.width > 2 && rect.height > 2:
                 recordUndoState()
@@ -267,6 +273,17 @@ final class EditorCanvasView: NSView {
         case .moving(let index, _), .resizing(let index, _, _, _):
             selectedAnnotationIndex = index
         }
+    }
+
+    override func flagsChanged(with event: NSEvent) {
+        // Pressing or releasing Shift mid-drag re-snaps the arrow preview
+        // immediately instead of waiting for the mouse to move again.
+        if case .drawing(let start, _) = dragMode {
+            dragShiftHeld = event.modifierFlags.contains(.shift)
+            dragMode = .drawing(start: start, current: drawingEnd(from: start, to: imagePoint(from: event.locationInWindow, clamped: true)))
+            needsDisplay = true
+        }
+        super.flagsChanged(with: event)
     }
 
     override func keyDown(with event: NSEvent) {
@@ -426,6 +443,13 @@ final class EditorCanvasView: NSView {
         ArrowShape.bend(fromDragPath: dragPath)
     }
 
+    /// End point of an in-progress drag. While Shift is held, new arrows snap to
+    /// the horizontal or vertical axis they are being pulled along.
+    private func drawingEnd(from start: NSPoint, to end: NSPoint) -> NSPoint {
+        guard dragShiftHeld, tool == .arrow || tool == .curve else { return end }
+        return Geometry.axisLockedPoint(from: start, to: end)
+    }
+
     private func drawPreview() {
         guard case .drawing(let start, let current) = dragMode else { return }
         switch tool {
@@ -434,7 +458,7 @@ final class EditorCanvasView: NSView {
         case .arrow:
             drawArrow(start: start, end: current, bend: 0, color: .systemRed, lineWidth: Annotation.defaultArrowLineWidth)
         case .curve:
-            drawArrow(start: start, end: current, bend: currentDragBend(), color: .systemRed, lineWidth: Annotation.defaultArrowLineWidth)
+            drawArrow(start: start, end: current, bend: dragShiftHeld ? 0 : currentDragBend(), color: .systemRed, lineWidth: Annotation.defaultArrowLineWidth)
         case .text:
             break
         case .pixelate:

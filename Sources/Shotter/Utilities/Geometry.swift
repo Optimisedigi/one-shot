@@ -25,4 +25,15 @@ enum Geometry {
     static func normalizedRect(from start: NSPoint, to end: NSPoint) -> NSRect {
         NSRect(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(start.x - end.x), height: abs(start.y - end.y))
     }
+
+    /// Point on the horizontal or vertical axis through `start` that the drag is
+    /// closest to, for Shift-constrained straight lines.
+    static func axisLockedPoint(from start: NSPoint, to end: NSPoint) -> NSPoint {
+        let dx = end.x - start.x
+        let dy = end.y - start.y
+        if abs(dx) >= abs(dy) {
+            return NSPoint(x: end.x, y: start.y)
+        }
+        return NSPoint(x: start.x, y: end.y)
+    }
 }
