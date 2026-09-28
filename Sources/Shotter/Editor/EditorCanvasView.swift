@@ -61,6 +61,9 @@ final class EditorCanvasView: NSView {
     private var pixelateCache: [PixelateCacheKey: NSImage] = [:]
     private var activeTextView: MultilineCommittingTextView?
     private var activeTextOrigin: NSPoint?
+    /// Index of a committed annotation being re-edited in the inline editor;
+    /// nil while typing a brand-new one.
+    private var activeTextEditIndex: Int?
     private var activeTextToolbar: InlineTextToolbar?
     // Last text styling the user picked, reused by the next text annotation
     // and by later screenshots in this session.
@@ -168,6 +171,12 @@ final class EditorCanvasView: NSView {
             // Single-click selects and allows drag/resize like any annotation.
             if annotation.isStep, clickCount >= 2, stepNumberHitTest(annotation, at: point) {
                 beginNumberEdit(at: annotationIndex)
+                return
+            }
+            // Double-clicking committed text reopens it in the inline editor
+            // so its wording can be changed, not just moved or deleted.
+            if case .text = annotation.kind, clickCount >= 2 {
+                beginTextEdit(at: annotationIndex)
                 return
             }
             // The active tool wins over selection when it draws a different
@@ -479,6 +488,9 @@ final class EditorCanvasView: NSView {
 
     private func drawAnnotations(_ annotations: [Annotation]) {
         for (index, annotation) in annotations.enumerated() {
+            // The annotation being re-edited is drawn by the inline editor
+            // instead; drawing both would stack two cards.
+            if index == activeTextEditIndex { continue }
             switch annotation.kind {
             case .rectangle(let rect):
                 drawRectangle(rect, color: annotation.color, lineWidth: annotation.lineWidth)
@@ -575,6 +587,23 @@ final class EditorCanvasView: NSView {
     }
 
     private func beginInlineText(at imagePoint: NSPoint) {
+        beginInlineText(at: imagePoint, editing: nil, initialText: "")
+    }
+
+    /// Reopens a committed text annotation in the inline editor, pre-filled
+    /// with its wording and its own style (not whatever was typed last).
+    private func beginTextEdit(at index: Int) {
+        guard annotations.indices.contains(index),
+              case .text(let text, let origin, let fontSize) = annotations[index].kind else { return }
+        let annotation = annotations[index]
+        Self.textFontSize = fontSize
+        Self.textColor = annotation.color
+        Self.textBackground = annotation.borderColor
+        selectedAnnotationIndex = nil
+        beginInlineText(at: origin, editing: index, initialText: text)
+    }
+
+    private func beginInlineText(at imagePoint: NSPoint, editing editIndex: Int?, initialText: String) {
         commitActiveText()
         // Size and colors stay where the last text left them.
         let fieldOrigin = viewPoint(fromImagePoint: imagePoint)
@@ -595,8 +624,12 @@ final class EditorCanvasView: NSView {
         textView.layer?.masksToBounds = false
         textView.delegate = self
         addSubview(textView)
+        if !initialText.isEmpty {
+            textView.string = initialText
+        }
         activeTextView = textView
         activeTextOrigin = imagePoint
+        activeTextEditIndex = editIndex
 
         let toolbar = InlineTextToolbar(fontSize: Self.textFontSize, color: Self.textColor, backgroundColor: Self.textBackground)
         toolbar.onFontSize = { [weak self] size in
@@ -631,6 +664,15 @@ final class EditorCanvasView: NSView {
         textView.textColor = Self.textColor
         textView.insertionPointColor = Self.textColor
         textView.typingAttributes = TextAnnotationStyle.attributes(color: Self.textColor, fontSize: viewFontSize)
+        // Style changes and the re-edit prefill must restyle text already in
+        // the buffer, not just what gets typed next, so the editor always
+        // matches what drawText will paint on commit.
+        if let storage = textView.textStorage, storage.length > 0 {
+            storage.setAttributes(
+                TextAnnotationStyle.attributes(color: Self.textColor, fontSize: viewFontSize),
+                range: NSRange(location: 0, length: storage.length)
+            )
+        }
         textView.textContainerInset = pad
         textView.layer?.backgroundColor = Self.textBackground.cgColor
         textView.layer?.cornerRadius = TextAnnotationStyle.cornerRadius(for: viewFontSize)
@@ -720,18 +762,44 @@ final class EditorCanvasView: NSView {
     private func commitActiveText() {
         guard let textView = activeTextView else { return }
         let text = textView.string.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !text.isEmpty, let origin = activeTextOrigin {
-            recordUndoState()
-            annotations.append(Annotation(kind: .text(text, origin: origin, fontSize: Self.textFontSize), color: Self.textColor, borderColor: Self.textBackground))
-            selectedAnnotationIndex = annotations.indices.last
-        }
+        let origin = activeTextOrigin
+        let editIndex = activeTextEditIndex
         textView.removeFromSuperview()
         activeTextToolbar?.removeFromSuperview()
         activeTextToolbar = nil
         activeTextView = nil
         activeTextOrigin = nil
+        activeTextEditIndex = nil
         window?.makeFirstResponder(self)
-        needsDisplay = true
+        defer { needsDisplay = true }
+
+        if text.isEmpty {
+            // Clearing the wording while re-editing removes the annotation,
+            // just as committing empty new text creates nothing.
+            if let editIndex, isTextAnnotation(at: editIndex) {
+                recordUndoState()
+                annotations.remove(at: editIndex)
+                pixelateCache.removeAll()
+                selectedAnnotationIndex = nil
+            }
+            return
+        }
+        guard let origin else { return }
+        recordUndoState()
+        let committed = Annotation(kind: .text(text, origin: origin, fontSize: Self.textFontSize), color: Self.textColor, borderColor: Self.textBackground)
+        if let editIndex, isTextAnnotation(at: editIndex) {
+            // Rewrite in place so the annotation keeps its spot in the stack.
+            annotations[editIndex] = committed
+            selectedAnnotationIndex = editIndex
+        } else {
+            annotations.append(committed)
+            selectedAnnotationIndex = annotations.indices.last
+        }
+    }
+
+    private func isTextAnnotation(at index: Int) -> Bool {
+        guard annotations.indices.contains(index), case .text = annotations[index].kind else { return false }
+        return true
     }
 
     func applyColorToSelectedAnnotation(_ color: NSColor) {

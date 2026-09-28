@@ -105,7 +105,7 @@ The certificate is local to your Mac, self-signed, and used only to sign this ap
 - Click a shape to select it, then drag to move. Corner handles resize; on boxes, edge handles stretch just width or height.
 - **⌘C** / **⌘V** duplicates the selected box, text, number, or arrow. Paste as many times as you want (including the same number). With nothing selected, **⌘C** still copies the screenshot.
 - Selecting a shape lets you change its color and thickness from the toolbar.
-- Double-click a Step badge to edit its number.
+- Double-click a Step badge to edit its number. Double-click a text label to edit its wording — the same inline editor and font/color toolbar you typed it with.
 - Picking a different tool and clicking inside an existing shape draws a new one instead of moving the old one.
 
 Change the capture hotkey and launch-at-login in **Preferences**, from the menu bar icon.
