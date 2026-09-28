@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Build a Developer ID-signed, notarized Shotter DMG from a clean commit.
+# Build a Developer ID-signed, notarized One Shot DMG from a clean commit.
 # Requires:
 #   - Developer ID Application certificate in the login keychain
-#   - notarytool keychain profile "shotter-notary"
-#     (xcrun notarytool store-credentials shotter-notary --apple-id YOU --team-id NSD8UNQK9J)
+#   - notarytool keychain profile "oneshot-notary"
+#     (xcrun notarytool store-credentials oneshot-notary --apple-id YOU --team-id NSD8UNQK9J)
 #
 # Notarization must return status Accepted. Anything else stops the script.
 # If Apple is still processing when --wait gives up, the submission id and
@@ -14,15 +14,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_DIR"
 
-IDENTITY="${SHOTTER_CODESIGN_IDENTITY:-Developer ID Application: Peter Tu (NSD8UNQK9J)}"
-NOTARY_PROFILE="${SHOTTER_NOTARY_PROFILE:-shotter-notary}"
+IDENTITY="${ONESHOT_CODESIGN_IDENTITY:-Developer ID Application: Peter Tu (NSD8UNQK9J)}"
+NOTARY_PROFILE="${ONESHOT_NOTARY_PROFILE:-oneshot-notary}"
 VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$PROJECT_DIR/scripts/Info.plist.template")"
 
 DIST="$PROJECT_DIR/dist"
-APP="$DIST/Shotter.app"
-DMG="$DIST/Shotter-${VERSION}-macOS.dmg"
+APP="$DIST/One Shot.app"
+DMG="$DIST/OneShot-${VERSION}-macOS.dmg"
 STAGE="$DIST/dmg-stage"
-ZIP="$DIST/Shotter-${VERSION}-macOS.zip"
+ZIP="$DIST/OneShot-${VERSION}-macOS.zip"
 
 if [[ -n "$(git status --porcelain)" ]]; then
   echo "Refusing to release: the working tree has uncommitted changes." >&2
@@ -63,14 +63,14 @@ swift build -c release --triple x86_64-apple-macosx
 rm -rf "$APP" "$STAGE"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 lipo -create \
-  ".build/arm64-apple-macosx/release/Shotter" \
-  ".build/x86_64-apple-macosx/release/Shotter" \
-  -output "$APP/Contents/MacOS/Shotter"
-chmod +x "$APP/Contents/MacOS/Shotter"
+  ".build/arm64-apple-macosx/release/OneShot" \
+  ".build/x86_64-apple-macosx/release/OneShot" \
+  -output "$APP/Contents/MacOS/OneShot"
+chmod +x "$APP/Contents/MacOS/OneShot"
 cp "$PROJECT_DIR/scripts/Info.plist.template" "$APP/Contents/Info.plist"
 
 # Sign the executable before the bundle. There are no nested frameworks.
-codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP/Contents/MacOS/Shotter"
+codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP/Contents/MacOS/OneShot"
 codesign --force --options runtime --timestamp --sign "$IDENTITY" "$APP"
 codesign --verify --deep --strict --verbose=2 "$APP"
 
@@ -82,11 +82,11 @@ xcrun stapler staple "$APP"
 xcrun stapler validate "$APP"
 
 mkdir -p "$STAGE"
-cp -R "$APP" "$STAGE/Shotter.app"
+cp -R "$APP" "$STAGE/One Shot.app"
 ln -s /Applications "$STAGE/Applications"
 
 hdiutil create \
-  -volname "Shotter" \
+  -volname "One Shot" \
   -srcfolder "$STAGE" \
   -ov \
   -format UDZO \

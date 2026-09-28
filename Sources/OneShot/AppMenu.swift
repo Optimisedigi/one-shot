@@ -17,7 +17,7 @@ enum AppMenu {
         menu.addItem(settingsItem)
 
         menu.addItem(.separator())
-        let quitItem = NSMenuItem(title: "Quit Shotter", action: #selector(AppDelegate.quit), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: "Quit One Shot", action: #selector(AppDelegate.quit), keyEquivalent: "q")
         quitItem.target = target
         menu.addItem(quitItem)
         return menu

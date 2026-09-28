@@ -19,7 +19,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
             backing: .buffered,
             defer: false
         )
-        window.title = "Shotter Editor"
+        window.title = "One Shot Editor"
         window.contentView = stack
         window.initialFirstResponder = canvasView
         window.center()

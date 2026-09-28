@@ -2,9 +2,9 @@
 
 A fast, native macOS screenshot and annotation app. Capture a region with a hotkey, mark it up, save or copy. Nothing is uploaded and no account is required.
 
-The installed app is named **Shotter**. It lives in the menu bar, not the Dock. It needs macOS 13 or later.
+The app is named **One Shot**. It lives in the menu bar, not the Dock. It needs macOS 13 or later.
 
-![Shotter editor with a curved arrow and a text label on a photo of Half Dome](docs/editor.png)
+![One Shot editor with a curved arrow and a text label on a photo of Half Dome](docs/editor.png)
 
 ![Saved annotation: a red arrow pointing at Half Dome, labeled half dome](docs/annotation.png)
 
@@ -12,13 +12,15 @@ The installed app is named **Shotter**. It lives in the menu bar, not the Dock. 
 
 ## Download
 
-**[Download Shotter 0.1.0 for macOS](https://github.com/Optimisedigi/one-shot/releases/download/v0.1.0/Shotter-0.1.0-macOS.dmg)**
+**[Download One Shot 0.1.0 for macOS](https://github.com/Optimisedigi/one-shot/releases/download/v0.1.0/Shotter-0.1.0-macOS.dmg)**
+
+> **Note:** 0.1.0 was released before the rename from Shotter to One Shot, so the disk image is still called `Shotter-0.1.0-macOS.dmg` and installs as **Shotter.app**. The next release installs as **One Shot.app**. Because the bundle identifier changed too, macOS treats the renamed app as a different app: grant Screen Recording once more and add the login item again.
 
 The disk image is signed and notarized. It runs on macOS 13 or later, on Apple silicon and Intel.
 
 1. Open the DMG.
-2. Drag **Shotter** onto the **Applications** folder.
-3. Eject the disk image and open Shotter from Applications.
+2. Drag the app onto the **Applications** folder.
+3. Eject the disk image and open it from Applications.
 
 SHA-256: `969e5d31dd38580bc101b1ecddacaa61934f28e1f0d36055a6dd5cca71230406`
 
@@ -26,16 +28,16 @@ Or install with Homebrew from this repository:
 
 ```bash
 brew tap Optimisedigi/one-shot https://github.com/Optimisedigi/one-shot
-brew install --cask Optimisedigi/one-shot/shotter
+brew install --cask Optimisedigi/one-shot/one-shot
 ```
 
 ### Grant Screen Recording, one time
 
-macOS will not let any app read your screen until you allow it. Shotter only captures when you press the hotkey.
+macOS will not let any app read your screen until you allow it. One Shot only captures when you press the hotkey.
 
 1. Press **⌘⇧2** (the default capture hotkey).
 2. macOS shows a permission prompt. Click **Open System Settings**.
-3. Turn **Shotter** on under **Privacy & Security → Screen & System Audio Recording**.
+3. Turn the app on under **Privacy & Security → Screen & System Audio Recording**.
 4. Quit and reopen the app. macOS applies the new permission on restart.
 
 Press **⌘⇧2** again to capture.
@@ -60,7 +62,7 @@ cd one-shot
 scripts/install-app.sh
 ```
 
-The script builds the app, signs it with a local certificate, installs it to `/Applications/Shotter.app`, and opens it.
+The script builds the app, signs it with a local certificate, installs it to `/Applications/One Shot.app`, and opens it.
 
 ### Grant Screen Recording — required, one time
 
@@ -68,7 +70,7 @@ macOS will not let any app read your screen until you allow it.
 
 1. Press **⌘⇧2** (the default capture hotkey).
 2. macOS shows a permission prompt → click **Open System Settings**.
-3. Turn **Shotter** on under **Privacy & Security → Screen & System Audio Recording**.
+3. Turn the app on under **Privacy & Security → Screen & System Audio Recording**.
 4. **Quit and reopen the app** — macOS only applies the new permission on restart.
 
 Press **⌘⇧2** again and you're capturing.
@@ -77,13 +79,13 @@ Press **⌘⇧2** again and you're capturing.
 
 ## What the certificate is for
 
-The installer creates a local code-signing certificate called **Shotter Local Development** in your login keychain, then signs the app with it. This is automatic — you don't need to do anything.
+The installer creates a local code-signing certificate called **One Shot Local Development** in your login keychain, then signs the app with it. This is automatic — you don't need to do anything.
 
 **Why it matters:** macOS ties Screen Recording permission to an app's signature. Without a stable signature, the permission is thrown away on every rebuild and you'd have to re-grant it forever. With it, you grant once and it sticks across updates.
 
 The certificate is local to your Mac, self-signed, and used only to sign this app. It is never uploaded and grants no access to anything else.
 
-> **Note:** running `swift run Shotter` directly produces an *unsigned* binary that macOS will never grant Screen Recording to. Always use the installed app for real use.
+> **Note:** running `swift run OneShot` directly produces an *unsigned* binary that macOS will never grant Screen Recording to. Always use the installed app for real use.
 
 ---
 
@@ -119,7 +121,7 @@ git pull
 scripts/install-app.sh
 ```
 
-Your Screen Recording permission carries over, thanks to the certificate.
+Your Screen Recording permission carries over, thanks to the certificate. The one exception is the first update after the rename to One Shot: the app's identity changed, so grant Screen Recording once more that time.
 
 ---
 
@@ -127,8 +129,8 @@ Your Screen Recording permission carries over, thanks to the certificate.
 
 ```bash
 swift build          # compile
-swift run Shotter    # run unsigned (capture will be blocked by macOS)
-scripts/build-app.sh # build + sign a bundle at .build/Shotter.app without installing
+swift run OneShot    # run unsigned (capture will be blocked by macOS)
+scripts/build-app.sh # build + sign a bundle at .build/One Shot.app without installing
 ```
 
 There is no automated test suite. `swift build` is the compile check.
@@ -140,7 +142,7 @@ There is no automated test suite. `swift build` is the compile check.
 Store the notary login in the Keychain once. The password is prompted locally and is not written into the repo:
 
 ```bash
-xcrun notarytool store-credentials shotter-notary \
+xcrun notarytool store-credentials oneshot-notary \
   --apple-id "YOUR_APPLE_ID" \
   --team-id NSD8UNQK9J
 ```
@@ -151,7 +153,7 @@ Use an app-specific password from [appleid.apple.com](https://appleid.apple.com)
 scripts/release-dmg.sh
 ```
 
-The result is `dist/Shotter-<version>-macOS.dmg`. Do not commit `dist/`.
+The result is `dist/OneShot-<version>-macOS.dmg`, which contains `One Shot.app`. Do not commit `dist/`.
 
 Version 0.1.0 was built from commit `9120d7b`, notarized, and published as the GitHub release `v0.1.0`.
 
@@ -166,7 +168,7 @@ Screen Recording isn't granted. Follow the steps above, and make sure you fully 
 An old unsigned copy may be holding a stale entry. Reset it and reinstall:
 
 ```bash
-tccutil reset ScreenCapture local.shotter.app
+tccutil reset ScreenCapture local.oneshot.app
 scripts/install-app.sh
 ```
 

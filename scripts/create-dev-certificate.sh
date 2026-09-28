@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-IDENTITY_NAME="${SHOTTER_CODESIGN_IDENTITY:-Shotter Local Development}"
-KEYCHAIN="${SHOTTER_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
+IDENTITY_NAME="${ONESHOT_CODESIGN_IDENTITY:-One Shot Local Development}"
+KEYCHAIN="${ONESHOT_KEYCHAIN:-$HOME/Library/Keychains/login.keychain-db}"
 
 if security find-identity -v -p codesigning "$KEYCHAIN" | grep -Fq "\"$IDENTITY_NAME\""; then
     echo "Using existing code signing identity: $IDENTITY_NAME"
@@ -22,7 +22,7 @@ x509_extensions = codesign_ext
 
 [ dn ]
 CN = $IDENTITY_NAME
-O = Shotter
+O = One Shot
 
 [ codesign_ext ]
 basicConstraints = critical,CA:true
@@ -38,11 +38,11 @@ openssl req \
     -x509 \
     -days 3650 \
     -config "$TMP_DIR/openssl.cnf" \
-    -keyout "$TMP_DIR/shotter-dev.key" \
-    -out "$TMP_DIR/shotter-dev.crt" \
+    -keyout "$TMP_DIR/oneshot-dev.key" \
+    -out "$TMP_DIR/oneshot-dev.crt" \
     >/dev/null 2>&1
 
-P12_PASSWORD="shotter-local-dev"
+P12_PASSWORD="oneshot-local-dev"
 
 openssl pkcs12 \
     -export \
@@ -51,13 +51,13 @@ openssl pkcs12 \
     -keypbe PBE-SHA1-3DES \
     -certpbe PBE-SHA1-3DES \
     -name "$IDENTITY_NAME" \
-    -inkey "$TMP_DIR/shotter-dev.key" \
-    -in "$TMP_DIR/shotter-dev.crt" \
-    -out "$TMP_DIR/shotter-dev.p12" \
+    -inkey "$TMP_DIR/oneshot-dev.key" \
+    -in "$TMP_DIR/oneshot-dev.crt" \
+    -out "$TMP_DIR/oneshot-dev.p12" \
     -passout pass:"$P12_PASSWORD" \
     >/dev/null 2>&1
 
-security import "$TMP_DIR/shotter-dev.p12" \
+security import "$TMP_DIR/oneshot-dev.p12" \
     -k "$KEYCHAIN" \
     -P "$P12_PASSWORD" \
     -T /usr/bin/codesign \
@@ -68,7 +68,7 @@ security add-trusted-cert \
     -r trustRoot \
     -p codeSign \
     -k "$KEYCHAIN" \
-    "$TMP_DIR/shotter-dev.crt" \
+    "$TMP_DIR/oneshot-dev.crt" \
     >/dev/null
 
 echo "Created code signing identity: $IDENTITY_NAME"

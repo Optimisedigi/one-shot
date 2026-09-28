@@ -1,7 +1,7 @@
 import Foundation
 import ServiceManagement
 
-/// Keeps the macOS login item in step with the "Open Shotter at login" setting.
+/// Keeps the macOS login item in step with the "Open One Shot at login" setting.
 ///
 /// `SMAppService` registers the exact bundle that is running, so the login item
 /// goes stale whenever the app is reinstalled (the bundle and its signature are
@@ -101,7 +101,7 @@ private enum LaunchAtLoginError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .temporaryLocation(let path):
-            return "Shotter is running from a temporary location (\(path)). Move Shotter to your Applications folder, open it from there, and turn this setting on again."
+            return "One Shot is running from a temporary location (\(path)). Move One Shot to your Applications folder, open it from there, and turn this setting on again."
         }
     }
 }

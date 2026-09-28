@@ -3,7 +3,7 @@ import AppKit
 final class PreferencesWindowController: NSWindowController {
     var onShortcutChanged: ((ShortcutChoice, ShortcutChoice) -> Bool)?
     private let shortcutPopup = NSPopUpButton(frame: .zero, pullsDown: false)
-    private let launchAtLoginButton = NSButton(checkboxWithTitle: "Open Shotter at login", target: nil, action: nil)
+    private let launchAtLoginButton = NSButton(checkboxWithTitle: "Open One Shot at login", target: nil, action: nil)
 
     init() {
         let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 190))
@@ -13,7 +13,7 @@ final class PreferencesWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = "Shotter Settings"
+        window.title = "One Shot Settings"
         window.contentView = contentView
         super.init(window: window)
         setupContent(in: contentView)
@@ -107,8 +107,8 @@ final class PreferencesWindowController: NSWindowController {
                 // Registered, but macOS opens apps at login only after the user
                 // approves them in System Settings.
                 NSAlert.showLoginItemsAlert(
-                    message: "Approve Shotter in Login Items",
-                    informativeText: "macOS only opens apps at login after you approve them. Turn on Shotter under “Open at Login” in System Settings → General → Login Items, and Shotter will open automatically when you log in."
+                    message: "Approve One Shot in Login Items",
+                    informativeText: "macOS only opens apps at login after you approve them. Turn on One Shot under “Open at Login” in System Settings → General → Login Items, and One Shot will open automatically when you log in."
                 )
             }
         } catch {

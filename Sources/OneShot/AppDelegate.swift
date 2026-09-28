@@ -16,8 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // silently missing the next login.
             if LaunchAtLoginSettings.isDesired, LaunchAtLoginSettings.requiresApproval {
                 NSAlert.showLoginItemsAlert(
-                    message: "Shotter is waiting for approval to open at login",
-                    informativeText: "macOS only opens apps at login after you approve them. Turn on Shotter under “Open at Login” in System Settings → General → Login Items, and Shotter will open automatically when you log in."
+                    message: "One Shot is waiting for approval to open at login",
+                    informativeText: "macOS only opens apps at login after you approve them. Turn on One Shot under “Open at Login” in System Settings → General → Login Items, and One Shot will open automatically when you log in."
                 )
             }
         }
@@ -55,9 +55,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         if let button = item.button {
             button.title = ""
-            button.image = NSImage(systemSymbolName: "display", accessibilityDescription: "Shotter")
+            button.image = NSImage(systemSymbolName: "display", accessibilityDescription: "One Shot")
             button.image?.isTemplate = true
-            button.toolTip = "Shotter"
+            button.toolTip = "One Shot"
         }
         item.menu = AppMenu.makeMenu(target: self)
         statusItem = item
@@ -66,7 +66,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupHotKey() -> Bool {
         let shortcut = ShortcutSettings.captureShortcut
         let manager = HotKeyManager(keyCode: shortcut.keyCode, modifiers: shortcut.modifiers) { [weak self] in
-            NSLog("Shotter global hotkey fired: \(shortcut.title)")
+            NSLog("One Shot global hotkey fired: \(shortcut.title)")
             self?.captureRegion()
         }
         do {
@@ -74,10 +74,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             try manager.register()
             oldManager?.unregister()
             hotKeyManager = manager
-            NSLog("Shotter registered global hotkey: \(shortcut.title)")
+            NSLog("One Shot registered global hotkey: \(shortcut.title)")
             return true
         } catch {
-            NSLog("Shotter failed to register global hotkey \(shortcut.title): \(error.localizedDescription)")
+            NSLog("One Shot failed to register global hotkey \(shortcut.title): \(error.localizedDescription)")
             NSAlert.show(message: "Could not register global hotkey", informativeText: "\(shortcut.title) may already be used by macOS or another app. Choose a different shortcut in Settings.\n\n\(error.localizedDescription)")
             return false
         }

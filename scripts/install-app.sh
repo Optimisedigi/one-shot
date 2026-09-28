@@ -3,9 +3,9 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
-APP_NAME="Shotter"
+APP_NAME="One Shot"
 BUILT_APP="$PROJECT_DIR/.build/$APP_NAME.app"
-INSTALL_DIR="${SHOTTER_INSTALL_DIR:-/Applications}"
+INSTALL_DIR="${ONESHOT_INSTALL_DIR:-/Applications}"
 INSTALLED_APP="$INSTALL_DIR/$APP_NAME.app"
 
 cd "$PROJECT_DIR"

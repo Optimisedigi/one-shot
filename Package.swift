@@ -2,14 +2,14 @@
 import PackageDescription
 
 let package = Package(
-    name: "Shotter",
+    name: "OneShot",
     platforms: [.macOS(.v13)],
     products: [
-        .executable(name: "Shotter", targets: ["Shotter"])
+        .executable(name: "OneShot", targets: ["OneShot"])
     ],
     targets: [
         .executableTarget(
-            name: "Shotter",
+            name: "OneShot",
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("Carbon"),
