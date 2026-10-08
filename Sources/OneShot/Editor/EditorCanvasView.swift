@@ -401,11 +401,13 @@ final class EditorCanvasView: NSView {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.png]
         panel.nameFieldStringValue = "SC.png"
+        panel.directoryURL = Self.desktopDirectoryURL
         commitActiveText()
         panel.beginSheetModal(for: window) { [weak self] response in
             guard response == .OK, let url = panel.url, let data = self?.renderFinalImage().pngData() else { return }
             do {
                 try data.write(to: url)
+                self?.window?.close()
             } catch {
                 NSAlert.show(message: "Save failed", informativeText: error.localizedDescription)
             }
@@ -1175,7 +1177,7 @@ final class EditorCanvasView: NSView {
     func savePNGToDesktop(closeAfterSave: Bool = false) -> URL? {
         commitActiveText()
         guard let data = renderFinalImage().pngData() else { return nil }
-        let desktopURL = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first ?? FileManager.default.homeDirectoryForCurrentUser
+        let desktopURL = Self.desktopDirectoryURL
         let fileName = "SC \(Self.fileTimestamp()).png"
         let url = desktopURL.appendingPathComponent(fileName)
         do {
@@ -1188,6 +1190,11 @@ final class EditorCanvasView: NSView {
             NSAlert.show(message: "Save failed", informativeText: error.localizedDescription)
             return nil
         }
+    }
+
+    /// Where new saves default to, matching the quick-save location.
+    private static var desktopDirectoryURL: URL {
+        FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask).first ?? FileManager.default.homeDirectoryForCurrentUser
     }
 
     private static func fileTimestamp() -> String {
