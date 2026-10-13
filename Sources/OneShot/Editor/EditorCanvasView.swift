@@ -404,7 +404,7 @@ final class EditorCanvasView: NSView {
         panel.directoryURL = Self.desktopDirectoryURL
         commitActiveText()
         panel.beginSheetModal(for: window) { [weak self] response in
-            guard response == .OK, let url = panel.url, let data = self?.renderFinalImage().pngData() else { return }
+            guard response == .OK, let url = panel.url, let data = self?.encodedFinalImage() else { return }
             do {
                 try data.write(to: url)
                 self?.window?.close()
@@ -1176,7 +1176,7 @@ final class EditorCanvasView: NSView {
     @discardableResult
     func savePNGToDesktop(closeAfterSave: Bool = false) -> URL? {
         commitActiveText()
-        guard let data = renderFinalImage().pngData() else { return nil }
+        guard let data = encodedFinalImage() else { return nil }
         let desktopURL = Self.desktopDirectoryURL
         let fileName = "SC \(Self.fileTimestamp()).png"
         let url = desktopURL.appendingPathComponent(fileName)
@@ -1211,8 +1211,10 @@ final class EditorCanvasView: NSView {
         )
     }
 
-    private func renderFinalImage() -> NSImage {
-        ImageRenderer.render(baseImage: baseImage, annotations: annotations)
+    /// The PNG written by both Save and Copy, so the two always match.
+    private func encodedFinalImage() -> Data? {
+        guard let image = ImageRenderer.render(baseImage: baseImage, annotations: annotations) else { return nil }
+        return ScreenshotEncoder.pngData(from: image, pointSize: baseImage.size, quality: ImageQualitySettings.quality())
     }
 }
 

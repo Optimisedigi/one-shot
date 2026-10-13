@@ -4,9 +4,10 @@ final class PreferencesWindowController: NSWindowController {
     var onShortcutChanged: ((ShortcutChoice, ShortcutChoice) -> Bool)?
     private let shortcutPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private let launchAtLoginButton = NSButton(checkboxWithTitle: "Open One Shot at login", target: nil, action: nil)
+    private let qualityPopup = NSPopUpButton(frame: .zero, pullsDown: false)
 
     init() {
-        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 190))
+        let contentView = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 290))
         let window = NSWindow(
             contentRect: contentView.frame,
             styleMask: [.titled, .closable],
@@ -56,10 +57,31 @@ final class PreferencesWindowController: NSWindowController {
         launchAtLoginButton.action = #selector(launchAtLoginChanged)
         launchAtLoginButton.state = LaunchAtLoginSettings.isDesired ? .on : .off
 
+        let qualityLabel = NSTextField(labelWithString: "Image quality")
+        qualityLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        qualityLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        let qualityHelperLabel = NSTextField(wrappingLabelWithString: "Applies to saved and copied screenshots. High looks the same as Lossless at a fraction of the file size.")
+        qualityHelperLabel.font = .systemFont(ofSize: 12)
+        qualityHelperLabel.textColor = .secondaryLabelColor
+        qualityHelperLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        qualityPopup.translatesAutoresizingMaskIntoConstraints = false
+        qualityPopup.target = self
+        qualityPopup.action = #selector(qualityChanged)
+        for quality in ImageQuality.allCases {
+            qualityPopup.addItem(withTitle: quality.title)
+            qualityPopup.lastItem?.representedObject = quality.rawValue
+        }
+        selectCurrentQuality()
+
         contentView.addSubview(titleLabel)
         contentView.addSubview(shortcutPopup)
         contentView.addSubview(helperLabel)
         contentView.addSubview(launchAtLoginButton)
+        contentView.addSubview(qualityLabel)
+        contentView.addSubview(qualityPopup)
+        contentView.addSubview(qualityHelperLabel)
 
         NSLayoutConstraint.activate([
             titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
@@ -75,7 +97,18 @@ final class PreferencesWindowController: NSWindowController {
 
             launchAtLoginButton.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
             launchAtLoginButton.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -24),
-            launchAtLoginButton.topAnchor.constraint(equalTo: helperLabel.bottomAnchor, constant: 24)
+            launchAtLoginButton.topAnchor.constraint(equalTo: helperLabel.bottomAnchor, constant: 24),
+
+            qualityLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            qualityLabel.topAnchor.constraint(equalTo: launchAtLoginButton.bottomAnchor, constant: 28),
+
+            qualityPopup.leadingAnchor.constraint(equalTo: qualityLabel.trailingAnchor, constant: 16),
+            qualityPopup.centerYAnchor.constraint(equalTo: qualityLabel.centerYAnchor),
+            qualityPopup.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -24),
+
+            qualityHelperLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 24),
+            qualityHelperLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -24),
+            qualityHelperLabel.topAnchor.constraint(equalTo: qualityLabel.bottomAnchor, constant: 18)
         ])
     }
 
@@ -84,6 +117,19 @@ final class PreferencesWindowController: NSWindowController {
         if let item = shortcutPopup.itemArray.first(where: { $0.representedObject as? String == currentID }) {
             shortcutPopup.select(item)
         }
+    }
+
+    private func selectCurrentQuality() {
+        let current = ImageQualitySettings.quality().rawValue
+        if let item = qualityPopup.itemArray.first(where: { $0.representedObject as? String == current }) {
+            qualityPopup.select(item)
+        }
+    }
+
+    @objc private func qualityChanged() {
+        guard let rawValue = qualityPopup.selectedItem?.representedObject as? String,
+              let quality = ImageQuality(rawValue: rawValue) else { return }
+        ImageQualitySettings.setQuality(quality)
     }
 
     @objc private func shortcutChanged() {

@@ -18,6 +18,10 @@ let package = Package(
                 .linkedFramework("ServiceManagement"),
                 .linkedFramework("UniformTypeIdentifiers")
             ]
+        ),
+        .testTarget(
+            name: "OneShotTests",
+            dependencies: ["OneShot"]
         )
     ]
 )

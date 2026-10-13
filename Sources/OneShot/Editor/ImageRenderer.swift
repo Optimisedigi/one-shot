@@ -1,10 +1,31 @@
 import AppKit
 
 enum ImageRenderer {
-    static func render(baseImage: NSImage, annotations: [Annotation]) -> NSImage {
-        let image = NSImage(size: baseImage.size)
-        image.lockFocus()
-        baseImage.draw(in: NSRect(origin: .zero, size: baseImage.size), from: NSRect(origin: .zero, size: baseImage.size), operation: .sourceOver, fraction: 1)
+    /// Flattens the annotations onto the capture at the capture's own pixel
+    /// size. (`NSImage.lockFocus` would use the main screen's scale instead,
+    /// upscaling — and bloating — captures taken on a lower-density display.)
+    static func render(baseImage: NSImage, annotations: [Annotation]) -> CGImage? {
+        let size = baseImage.size
+        guard size.width > 0, size.height > 0 else { return nil }
+        let source = baseImage.cgImage(forProposedRect: nil, context: nil, hints: nil)
+        let pixelWidth = source?.width ?? Int(size.width.rounded(.up))
+        let pixelHeight = source?.height ?? Int(size.height.rounded(.up))
+        guard let context = CGContext(
+            data: nil,
+            width: pixelWidth,
+            height: pixelHeight,
+            bitsPerComponent: 8,
+            bytesPerRow: 0,
+            space: RGBPixels.colorSpace,
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+        context.scaleBy(x: CGFloat(pixelWidth) / size.width, y: CGFloat(pixelHeight) / size.height)
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        defer { NSGraphicsContext.restoreGraphicsState() }
+
+        baseImage.draw(in: NSRect(origin: .zero, size: size), from: NSRect(origin: .zero, size: size), operation: .sourceOver, fraction: 1)
         for annotation in annotations {
             switch annotation.kind {
             case .rectangle(let rect):
@@ -19,8 +40,7 @@ enum ImageRenderer {
                 drawStep(number: number, center: center, radius: radius, color: annotation.color, borderColor: annotation.borderColor)
             }
         }
-        image.unlockFocus()
-        return image
+        return context.makeImage()
     }
 
     private static func drawRectangle(_ rect: NSRect, color: NSColor, lineWidth: CGFloat) {

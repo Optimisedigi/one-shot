@@ -2,12 +2,6 @@ import AppKit
 import UniformTypeIdentifiers
 
 extension NSImage {
-    func pngData() -> Data? {
-        guard let tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiffRepresentation) else { return nil }
-        return bitmap.representation(using: .png, properties: [:])
-    }
-
     func cropped(to rect: NSRect) -> NSImage? {
         guard let cgImage = cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
         let scaleX = CGFloat(cgImage.width) / size.width
