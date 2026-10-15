@@ -298,7 +298,7 @@ final class EditorCanvasView: NSView {
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "s" {
             commitActiveText()
-            savePNGToDesktop(closeAfterSave: true)
+            saveToDesktop(closeAfterSave: true)
         } else if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "c", activeTextView == nil {
             copySelectionOrImage()
         } else if event.modifierFlags.contains(.command), event.charactersIgnoringModifiers == "v", activeTextView == nil {
@@ -389,18 +389,18 @@ final class EditorCanvasView: NSView {
     /// than raw image data, so pasting into a terminal yields its path.
     func copyToClipboard() {
         commitActiveText()
-        guard let url = savePNGToDesktop() else { return }
+        guard let url = saveToDesktop() else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.writeObjects([url as NSURL])
         window?.close()
     }
 
-    func savePNG() {
+    func saveAs() {
         guard let window else { return }
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.png]
-        panel.nameFieldStringValue = "SC.png"
+        panel.allowedContentTypes = [ScreenshotEncoder.contentType]
+        panel.nameFieldStringValue = "SC.\(ScreenshotEncoder.fileExtension)"
         panel.directoryURL = Self.desktopDirectoryURL
         commitActiveText()
         panel.beginSheetModal(for: window) { [weak self] response in
@@ -1174,11 +1174,11 @@ final class EditorCanvasView: NSView {
     /// Saves to the Desktop and returns where it landed, so callers can also
     /// put the file on the pasteboard.
     @discardableResult
-    func savePNGToDesktop(closeAfterSave: Bool = false) -> URL? {
+    func saveToDesktop(closeAfterSave: Bool = false) -> URL? {
         commitActiveText()
         guard let data = encodedFinalImage() else { return nil }
         let desktopURL = Self.desktopDirectoryURL
-        let fileName = "SC \(Self.fileTimestamp()).png"
+        let fileName = "SC \(Self.fileTimestamp()).\(ScreenshotEncoder.fileExtension)"
         let url = desktopURL.appendingPathComponent(fileName)
         do {
             try data.write(to: url)
@@ -1211,10 +1211,10 @@ final class EditorCanvasView: NSView {
         )
     }
 
-    /// The PNG written by both Save and Copy, so the two always match.
+    /// The JPEG written by both Save and Copy, so the two always match.
     private func encodedFinalImage() -> Data? {
         guard let image = ImageRenderer.render(baseImage: baseImage, annotations: annotations) else { return nil }
-        return ScreenshotEncoder.pngData(from: image, pointSize: baseImage.size, quality: ImageQualitySettings.quality())
+        return ScreenshotEncoder.jpegData(from: image, pointSize: baseImage.size, quality: ImageQualitySettings.quality())
     }
 }
 

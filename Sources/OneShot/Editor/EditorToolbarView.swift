@@ -219,7 +219,7 @@ final class EditorToolbarView: NSView {
         actions.spacing = 8
         actions.alignment = .centerY
         actions.addArrangedSubview(iconButton(symbolName: "doc.on.doc", toolTip: "Save to Desktop & copy file path", action: #selector(copyImage)))
-        actions.addArrangedSubview(iconButton(symbolName: "square.and.arrow.down", toolTip: "Save As…", action: #selector(savePNG)))
+        actions.addArrangedSubview(iconButton(symbolName: "square.and.arrow.down", toolTip: "Save As…", action: #selector(saveAs)))
         return actions
     }
 
@@ -421,8 +421,8 @@ final class EditorToolbarView: NSView {
         canvasView?.copyToClipboard()
     }
 
-    @objc private func savePNG() {
-        canvasView?.savePNG()
+    @objc private func saveAs() {
+        canvasView?.saveAs()
     }
 
     private func updateSelectionControls(color: NSColor?, borderColor: NSColor?, weight: CGFloat?) {

@@ -25,7 +25,7 @@ final class EditorWindowController: NSWindowController, NSWindowDelegate {
         window.center()
         super.init(window: window)
         window.onQuickSave = { [weak self] in
-            self?.canvasView.savePNGToDesktop(closeAfterSave: true)
+            self?.canvasView.saveToDesktop(closeAfterSave: true)
         }
         window.canCopyImage = { [weak self] in
             guard let self else { return false }

@@ -1,63 +1,54 @@
 import AppKit
 import ImageIO
+import UniformTypeIdentifiers
 import XCTest
 @testable import OneShot
 
 final class ScreenshotEncoderTests: XCTestCase {
-    func testLosslessRoundTripsEveryPixel() throws {
+    func testEncodesAsJPEGThatDecodesAtFullSize() throws {
         let source = Self.screenshotLikePixels(width: 240, height: 160)
-        let data = try XCTUnwrap(ScreenshotEncoder.pngData(from: try XCTUnwrap(source.makeTruecolorImage()), quality: .lossless))
-        XCTAssertEqual(try Self.decode(data).bytes, source.bytes)
+        let data = try XCTUnwrap(ScreenshotEncoder.jpegData(from: try XCTUnwrap(source.makeTruecolorImage()), quality: .high))
+        XCTAssertEqual(Array(data.prefix(3)), [0xFF, 0xD8, 0xFF], "JPEG SOI marker")
+        let imageSource = try XCTUnwrap(CGImageSourceCreateWithData(data as CFData, nil))
+        XCTAssertEqual(CGImageSourceGetType(imageSource) as String?, UTType.jpeg.identifier)
+        let decoded = try Self.decode(data)
+        XCTAssertEqual(decoded.width, 240)
+        XCTAssertEqual(decoded.height, 160)
     }
 
-    func testFewColorsAreStoredExactlyAsPalette() throws {
-        // Flat UI: 4 colors, so even the palette qualities must be lossless.
-        let colors: [[UInt8]] = [[30, 30, 30], [255, 59, 48], [255, 255, 255], [10, 132, 255]]
-        let width = 64, height = 48
-        var bytes: [UInt8] = []
-        for y in 0..<height {
-            for x in 0..<width { bytes += colors[(x / 16 + y / 12) % colors.count] }
-        }
-        let source = RGBPixels(width: width, height: height, bytes: bytes)
-
-        for quality in [ImageQuality.high, .compact] {
-            let data = try XCTUnwrap(ScreenshotEncoder.pngData(from: try XCTUnwrap(source.makeTruecolorImage()), quality: quality))
-            XCTAssertEqual(try Self.decode(data).bytes, source.bytes, "\(quality)")
-        }
+    func testSaveFormatIsJPG() {
+        XCTAssertEqual(ScreenshotEncoder.fileExtension, "jpg")
+        XCTAssertEqual(ScreenshotEncoder.contentType, .jpeg)
+        XCTAssertEqual(UTType(filenameExtension: ScreenshotEncoder.fileExtension), .jpeg)
     }
 
-    func testPaletteQualitiesShrinkRichImagesWithoutVisibleLoss() throws {
+    func testQualitiesTradeSizeForFidelity() throws {
         let source = Self.screenshotLikePixels(width: 480, height: 320)
         let image = try XCTUnwrap(source.makeTruecolorImage())
-        let lossless = try XCTUnwrap(ScreenshotEncoder.pngData(from: image, quality: .lossless))
-        let high = try XCTUnwrap(ScreenshotEncoder.pngData(from: image, quality: .high))
-        let compact = try XCTUnwrap(ScreenshotEncoder.pngData(from: image, quality: .compact))
+        let maximum = try XCTUnwrap(ScreenshotEncoder.jpegData(from: image, quality: .lossless))
+        let high = try XCTUnwrap(ScreenshotEncoder.jpegData(from: image, quality: .high))
+        let compact = try XCTUnwrap(ScreenshotEncoder.jpegData(from: image, quality: .compact))
 
-        XCTAssertLessThan(Double(high.count), Double(lossless.count) * 0.6)
-        XCTAssertLessThanOrEqual(compact.count, high.count)
-        XCTAssertGreaterThan(Self.psnr(source, try Self.decode(high)), 38)
-        XCTAssertGreaterThan(Self.psnr(source, try Self.decode(compact)), 32)
+        XCTAssertLessThan(high.count, maximum.count)
+        XCTAssertLessThan(compact.count, high.count)
+        XCTAssertGreaterThan(Self.psnr(source, try Self.decode(maximum)), 38)
+        XCTAssertGreaterThan(Self.psnr(source, try Self.decode(high)), 32)
+        XCTAssertGreaterThan(Self.psnr(source, try Self.decode(compact)), 28)
     }
 
-    func testPaletteKeepsAnnotationColorsExact() throws {
-        // A saturated annotation stroke over a photo-like gradient must keep
-        // its exact color rather than being dithered into its surroundings.
-        let width = 200, height = 120
-        var source = Self.screenshotLikePixels(width: width, height: height).bytes
-        let red: [UInt8] = [255, 59, 48]
-        for y in 50..<60 {
-            for x in 0..<width { source.replaceSubrange((y * width + x) * 3..<(y * width + x) * 3 + 3, with: red) }
-        }
-        let pixels = RGBPixels(width: width, height: height, bytes: source)
-        let data = try XCTUnwrap(ScreenshotEncoder.pngData(from: try XCTUnwrap(pixels.makeTruecolorImage()), quality: .high))
-        let decoded = try Self.decode(data)
-        let offset = (55 * width + 100) * 3
-        XCTAssertEqual(Array(decoded.bytes[offset..<offset + 3]), red)
+    func testTransparencyCompositesOntoWhite() throws {
+        let context = try XCTUnwrap(CGContext(
+            data: nil, width: 16, height: 16, bitsPerComponent: 8, bytesPerRow: 0,
+            space: RGBPixels.colorSpace, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ))
+        let transparent = try XCTUnwrap(context.makeImage())
+        let data = try XCTUnwrap(ScreenshotEncoder.jpegData(from: transparent, quality: .high))
+        XCTAssertTrue(try Self.decode(data).bytes.allSatisfy { $0 >= 250 })
     }
 
     func testRetinaCapturesRecordTheirPointSize() throws {
         let source = Self.screenshotLikePixels(width: 200, height: 100)
-        let data = try XCTUnwrap(ScreenshotEncoder.pngData(
+        let data = try XCTUnwrap(ScreenshotEncoder.jpegData(
             from: try XCTUnwrap(source.makeTruecolorImage()),
             pointSize: CGSize(width: 100, height: 50),
             quality: .high

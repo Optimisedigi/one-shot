@@ -112,7 +112,7 @@ The certificate is local to your Mac, self-signed, and used only to sign this ap
 
 Change the capture hotkey and launch-at-login in **Preferences**, from the menu bar icon.
 
-Screenshots are saved (and copied) as optimized PNGs. **Image quality** in Preferences picks the trade-off: **High** (default) uses a 256-colour palette that looks the same as the original at roughly a third of the size; **Lossless** keeps every pixel; **Compact** is smaller still but photos can look grainy when zoomed.
+Screenshots are saved (and copied) as JPGs. **Image quality** in Preferences picks the trade-off: **High** (default) looks the same as the original at a fraction of the size; **Maximum** keeps the most detail; **Compact** is smaller still but fine text and gradients can show artifacts when zoomed.
 
 ---
 
